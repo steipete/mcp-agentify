@@ -43,7 +43,7 @@
     },
     "dependencies": {
         "dotenv": "^16.5.0",
-        "express": "^5.1.0",
+        "express": "^4.21.2",
         "openai": "^4.98.0",
         "pino": "^9.6.0",
         "vscode-jsonrpc": "^8.2.1",
@@ -64,6 +64,7 @@
         "pino-pretty": "^13.0.0",
         "prettier": "^3.5.3",
         "ts-node": "^10.9.2",
+        "tsx": "^4.19.4",
         "typescript": "^5.8.3",
         "typescript-eslint": "^8.32.1",
         "vitest": "^3.1.3"
