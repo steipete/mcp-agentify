@@ -1,6 +1,6 @@
-import { spawn, ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import type { Logger as PinoLoggerBase } from 'pino';
-import { PinoLogLevel } from './logger'; // Assuming PinoLogLevel is exported from logger.ts
+import type { PinoLogLevel } from './logger';
 import type {
     // LSP types
     InitializeParams,
@@ -9,16 +9,17 @@ import type {
 import {
     // Node-specific values (classes/functions)
     createMessageConnection,
-    NotificationType, // Class, used for typing notifications but method name is string
-    RequestType, // Class, used for typing requests but method name is string
+    // NotificationType, // Removed as unused
+    // RequestType       // Removed as unused
 } from 'vscode-jsonrpc/node';
 import type {
     // Node-specific types (interfaces/type aliases)
     MessageConnection,
     Logger as VSCodeJsonRpcLogger,
 } from 'vscode-jsonrpc/node';
-import type { BackendConfig, BackendInstance, BackendStdioConfig } from './interfaces';
+import type { BackendConfig, BackendInstance, BackendStdioConfig, McpTraceEntry } from './interfaces';
 import { logError as appLogError } from './logger'; // Import the utility
+import { EventEmitter } from 'node:events'; // Import EventEmitter
 // MessageConnection will be used in a later subtask (4.2)
 // import type { MessageConnection } from 'vscode-jsonrpc/node';
 
@@ -30,11 +31,12 @@ const createRpcLoggerAdapter = (pinoLogger: PinoLoggerBase<PinoLogLevel>): VSCod
     log: (message: string) => pinoLogger.debug(message), // Map VSCodeJsonRpcLogger.log to pinoLogger.debug
 });
 
-export class BackendManager {
+export class BackendManager extends EventEmitter { // Extend EventEmitter
     private backendInstances: Map<string, BackendInstance> = new Map();
     private logger: PinoLoggerBase<PinoLogLevel>;
 
     constructor(logger: PinoLoggerBase<PinoLogLevel>) {
+        super(); // Call super constructor
         this.logger = logger.child({ component: 'BackendManager' });
         this.logger.info('BackendManager initialized');
     }
@@ -243,9 +245,11 @@ export class BackendManager {
         }
 
         backendLogger.debug({ params }, `Sending request to backend method '${method}'`);
+        this.emitMcpTrace('OUTGOING_FROM_GATEWAY', backendId, undefined /* id */, method, params);
         try {
             const result = await instance.connection.sendRequest(method, params);
             backendLogger.debug({ result }, `Received response from backend method '${method}'`);
+            this.emitMcpTrace('INCOMING_TO_GATEWAY', backendId, undefined /* id */, method, result);
             return result;
         } catch (error) {
             appLogError(
@@ -253,8 +257,43 @@ export class BackendManager {
                 error as Error,
                 `Error during request to backend method '${method}'`,
             );
+            // Emit trace for error response from backend
+            this.emitMcpTrace('INCOMING_TO_GATEWAY', backendId, undefined /* id */, method, undefined, error as Error);
             throw error;
         }
+    }
+
+    private emitMcpTrace(direction: McpTraceEntry['direction'], backendId: string | undefined, id: string | number | undefined, method: string, paramsOrResult?: any, error?: Error) {
+        const traceEntry: McpTraceEntry = {
+            timestamp: Date.now(),
+            direction,
+            backendId,
+            id: id !== undefined ? String(id) : undefined, // Ensure id is string or undefined
+            method,
+            paramsOrResult: this.sanitizeTraceData(paramsOrResult),
+            error: error ? { message: error.message, name: error.name, stack: error.stack?.substring(0, 200) } : undefined,
+        };
+        this.emit('mcpTrace', traceEntry);
+    }
+
+    // Basic sanitization for trace data (can be expanded)
+    private sanitizeTraceData(data: any): any {
+        if (typeof data === 'string' && data.length > 500) {
+            return `${data.substring(0, 497)}...`;
+        }
+        // Basic check for objects that might be too large or contain sensitive info
+        // This is very rudimentary; a proper solution would involve deeper inspection or schema-based filtering
+        if (typeof data === 'object' && data !== null) {
+            try {
+                const serialized = JSON.stringify(data);
+                if (serialized.length > 1024) { // Arbitrary limit for PoC
+                    return { summary: 'Object too large, truncated for trace', keys: Object.keys(data) };
+                }
+            } catch (e) {
+                return { summary: 'Could not serialize object for trace' };
+            }
+        }
+        return data;
     }
 
     public async shutdownAllBackends(): Promise<void> {
