@@ -445,7 +445,9 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
     });
 
     connection.listen();
-    tempConsoleLogger.info(
-        "mcp-agentify server logic started. Listening for client connection via stdio. Logger will be fully initialized upon receiving 'initialize' request.",
+    pinoLogger.info(
+        "[GATEWAY SERVER] MCP Agentify server fully started and listening on stdio."
     );
+    // Keep the server alive indefinitely until an exit event
+    return new Promise(() => { /* This promise never resolves, keeping the process alive */ });
 }

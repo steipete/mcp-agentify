@@ -61,7 +61,8 @@ describe('GatewayOptionsSchema', () => {
         OPENAI_API_KEY: 'sk-testkey',
         backends: [validBackendConfig],
     };
-    const baseValidOptionsWithoutKey = { // For testing optional OPENAI_API_KEY
+    const baseValidOptionsWithoutKey = {
+        // For testing optional OPENAI_API_KEY
         backends: [validBackendConfig],
     };
 
@@ -89,20 +90,25 @@ describe('GatewayOptionsSchema', () => {
 
     it('should validate successfully if OPENAI_API_KEY is missing (it is optional in schema)', () => {
         const result = GatewayOptionsSchema.safeParse(baseValidOptionsWithoutKey);
-        expect(result.success, `Schema parse failed: ${JSON.stringify(result.success ? {} : result.error?.format())}`).toBe(true);
+        expect(
+            result.success,
+            `Schema parse failed: ${JSON.stringify(result.success ? {} : result.error?.format())}`,
+        ).toBe(true);
         if (result.success) {
             expect(result.data.OPENAI_API_KEY).toBeUndefined();
         }
     });
 
     it('should reject if OPENAI_API_KEY is an empty string (due to min(1))', () => {
-        const result = GatewayOptionsSchema.safeParse({ 
+        const result = GatewayOptionsSchema.safeParse({
             ...baseValidOptionsWithoutKey, // has backends
-            OPENAI_API_KEY: '' 
+            OPENAI_API_KEY: '',
         });
         expect(result.success).toBe(false);
         if (!result.success) {
-            expect(result.error.flatten().fieldErrors.OPENAI_API_KEY).toContain('String must contain at least 1 character(s)');
+            expect(result.error.flatten().fieldErrors.OPENAI_API_KEY).toContain(
+                'String must contain at least 1 character(s)',
+            );
         }
     });
 

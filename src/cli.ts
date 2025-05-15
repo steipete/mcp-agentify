@@ -73,8 +73,8 @@ async function main() {
 
     await startAgentifyServer(initialCliOptions);
 
-    // Note: At this point, startAgentifyServer has set up its own listeners within server.ts.
-    // The listeners below are for the entire CLI process.
+    cliLogger.info('[CLI] Main function completed. Server should be running via startAgentifyServer.');
+    // The process should stay alive due to the stdio listener in server.ts
 }
 
 // Register process-wide event handlers *outside* main, so they are always active.

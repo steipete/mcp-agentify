@@ -1,0 +1,354 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    background-color: #f4f4f8;
+    color: #333;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1200px;
+    margin: auto;
+    background: #fff;
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.1);
+}
+
+h1 {
+    text-align: center;
+    color: #2c3e50;
+    margin-bottom: 30px;
+}
+
+h2 {
+    color: #34495e;
+    border-bottom: 2px solid #ecf0f1;
+    padding-bottom: 10px;
+    margin-top: 30px;
+}
+
+section {
+    margin-bottom: 30px;
+}
+
+pre {
+    background-color: #ecf0f1;
+    padding: 15px;
+    border-radius: 5px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.9em;
+}
+
+.log-container {
+    height: 400px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    background-color: #fdfdfd;
+    border-radius: 5px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.85em;
+}
+
+.log-entry, .trace-entry {
+    padding: 5px 0;
+    border-bottom: 1px dashed #eee;
+    word-break: break-all;
+}
+
+.log-entry:last-child, .trace-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry .timestamp, .trace-entry .timestamp {
+    color: #7f8c8d;
+    margin-right: 10px;
+    font-size: 0.9em;
+}
+
+.log-entry .level-TRACE { color: #95a5a6; }
+.log-entry .level-DEBUG { color: #3498db; }
+.log-entry .level-INFO { color: #2ecc71; }
+.log-entry .log-message-INFO { font-weight: normal; }
+.log-entry .level-WARN { color: #f39c12; }
+.log-entry .level-ERROR { color: #e74c3c; }
+.log-entry .level-FATAL { color: #c0392b; font-weight: bold; }
+
+.trace-entry .direction-INCOMING_TO_GATEWAY { color: #2980b9; }
+.trace-entry .direction-OUTGOING_FROM_GATEWAY { color: #8e44ad; }
+
+.log-entry .message, .trace-entry .method {
+    font-weight: bold;
+}
+
+.log-entry .details, .trace-entry .params {
+    margin-left: 20px;
+    font-size: 0.95em;
+    color: #555;
+}
+
+#logs-filter, #trace-filter {
+    margin-bottom: 10px;
+    padding: 10px;
+    background-color: #f9f9f9;
+    border-radius: 4px;
+    border: 1px solid #eee;
+}
+
+#logs-filter label, #trace-filter label {
+    margin-right: 5px;
+}
+
+#logs-filter select, #logs-filter input, #trace-filter input {
+    margin-right: 15px;
+    padding: 5px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+}
+
+#status-content ul {
+    list-style-type: none;
+    padding-left: 0;
+}
+#status-content li {
+    padding: 5px 0;
+    border-bottom: 1px solid #eee;
+}
+#status-content li:last-child {
+    border-bottom: none;
+}
+#status-content li strong {
+    display: inline-block;
+    width: 150px;
+}
+
+/* Tab styling */
+.tabs {
+    overflow: hidden;
+    border-bottom: 1px solid #ccc;
+    margin-bottom: 20px;
+}
+
+.tab-button {
+    background-color: inherit;
+    float: left;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    padding: 14px 16px;
+    transition: 0.3s;
+    font-size: 17px;
+    border-radius: 5px 5px 0 0; /* Rounded top corners */
+}
+
+.tab-button:hover {
+    background-color: #ddd;
+}
+
+.tab-button.active {
+    background-color: #ccc;
+    border-bottom: 2px solid #2c3e50; /* Highlight active tab */
+}
+
+.tab-content {
+    display: none; /* Hidden by default */
+    padding: 6px 12px;
+    border-top: none;
+}
+
+.tab-content.active {
+    display: block; /* Show active tab content */
+}
+
+/* Main app container styling */
+.app-container {
+    width: 100%;
+    max-width: 1400px; /* Wider for more complex UI */
+    margin: 20px; /* Add some margin around the app */
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    text-align: center;
+    color: #2c3e50;
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+main {
+    /* Styles for the main content area if needed */
+}
+
+footer {
+    text-align: center;
+    margin-top: 30px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+    font-size: 0.9em;
+    color: #777;
+}
+
+/* Re-purpose existing styles and add new ones for Preact components as needed */
+/* For example, if we have tabs later: */
+.tabs {
+    overflow: hidden;
+    border-bottom: 1px solid #ccc;
+    margin-bottom: 15px;
+}
+
+.tab-button {
+    background-color: inherit;
+    float: left;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    padding: 12px 15px;
+    transition: 0.3s;
+    font-size: 1em;
+    border-radius: 5px 5px 0 0;
+}
+
+.tab-button:hover {
+    background-color: #ddd;
+}
+
+.tab-button.active {
+    background-color: #ccc;
+    border-bottom: 2px solid #2c3e50;
+}
+
+.tab-content {
+    display: none; 
+    padding: 10px;
+    border-top: none;
+}
+
+.tab-content.active {
+    display: block; 
+}
+
+/* General component styling */
+section {
+    margin-bottom: 25px;
+}
+
+h2 {
+    color: #34495e;
+    border-bottom: 1px solid #ecf0f1;
+    padding-bottom: 8px;
+    margin-top: 25px;
+    margin-bottom: 15px;
+    font-size: 1.4em;
+}
+h3 {
+    color: #3a5368;
+    font-size: 1.1em;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+pre {
+    background-color: #ecf0f1;
+    padding: 15px;
+    border-radius: 5px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.9em;
+}
+
+.log-container {
+    max-height: 450px; /* Increased height slightly */
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    background-color: #fdfdfd;
+    border-radius: 5px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.85em;
+}
+
+.log-entry, .trace-entry {
+    padding: 4px 0;
+    border-bottom: 1px dashed #eee;
+    word-break: break-all;
+}
+
+.log-entry:last-child, .trace-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry .timestamp, .trace-entry .timestamp {
+    color: #7f8c8d;
+    margin-right: 8px;
+    font-size: 0.9em;
+}
+
+.log-entry .level-TRACE { color: #95a5a6; }
+.log-entry .level-DEBUG { color: #3498db; }
+.log-entry .level-INFO { color: #2ecc71; }
+.log-entry .level-WARN { color: #f39c12; }
+.log-entry .level-ERROR { color: #e74c3c; }
+.log-entry .level-FATAL { color: #c0392b; font-weight: bold; }
+
+.trace-entry .direction-INCOMING_TO_GATEWAY { color: #2980b9; }
+.trace-entry .direction-OUTGOING_FROM_GATEWAY { color: #8e44ad; }
+
+.log-entry .message, .trace-entry .method {
+    font-weight: bold;
+}
+
+.log-entry .details, .trace-entry .params, .trace-entry .error-details {
+    margin-left: 15px;
+    font-size: 0.95em;
+    color: #555;
+    margin-top: 5px;
+}
+
+.filter-bar {
+    margin-bottom: 10px;
+    padding: 10px;
+    background-color: #f9f9f9;
+    border-radius: 4px;
+    border: 1px solid #eee;
+}
+
+.filter-bar label {
+    margin-right: 5px;
+}
+
+.filter-bar select, .filter-bar input {
+    margin-right: 15px;
+    padding: 6px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+}
+
+#status-content ul {
+    list-style-type: none;
+    padding-left: 0;
+}
+#status-content li {
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+}
+#status-content li:last-child {
+    border-bottom: none;
+}
+#status-content li strong {
+    display: inline-block;
+    min-width: 120px; /* Adjusted for better alignment */
+} 

@@ -122,9 +122,10 @@ describe('BackendManager', () => {
 
         it('should return false and set not ready if initialize request fails', async () => {
             if (!mockMessageConnectionInstance?.sendRequest) throw new Error('mock conn not setup');
-            (mockMessageConnectionInstance.sendRequest as vi.Mock)
-                .mockRejectedValueOnce(new Error('Initialize rejected'));
-            
+            (mockMessageConnectionInstance.sendRequest as vi.Mock).mockRejectedValueOnce(
+                new Error('Initialize rejected'),
+            );
+
             const success = await backendManager.initializeBackend(validBackendConfig);
             expect(success).toBe(false);
             const instance = backendManager.getBackendInstance(validBackendConfig.id);
