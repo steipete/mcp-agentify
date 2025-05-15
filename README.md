@@ -236,68 +236,70 @@ The Debug UI provides the following sections:
 
 ### Connecting and Initializing
 
-A client (e.g., an IDE extension) would typically spawn `mcp-agentify` as a child process and communicate over its `stdin`/`stdout`.
+When integrating `mcp-agentify` into an IDE or a development tool like Cursor or Windsurf, the tool itself typically handles the process of spawning `mcp-agentify` and establishing the `stdio` connection. As a user of such a tool, your primary concern is providing the correct `initializationOptions` to `mcp-agentify` through the tool's configuration interface (e.g., settings JSON, UI fields).
 
-**Example Initialization from a Client (JavaScript/TypeScript):**
-```typescript
-import { createMessageConnection } from 'vscode-jsonrpc/node';
-import { spawn, ChildProcess } from 'node:child_process';
-import type { InitializeResult, InitializeParams } from 'vscode-languageserver-protocol';
-// Assuming types like GatewayOptions, BackendConfig are defined/imported by the client
+The structure of these `initializationOptions` is defined by `mcp-agentify` (see the `GatewayOptionsSchema` in `src/schemas.ts` and the "Configuration" section above for details). Below is an example of what you might put into your IDE's configuration field for `mcp-agentify`'s initialization options:
 
-async function connectAndInitialize() {
-  const agentifyProcess = spawn('npx', ['mcp-agentify'], { stdio: 'pipe' }); // Or direct path if installed
+**Example `initializationOptions` (for IDE settings):**
 
-  const connection = createMessageConnection(
-    agentifyProcess.stdout,
-    agentifyProcess.stdin
-  );
-
-  agentifyProcess.stderr.on('data', (data) => {
-    console.error(`mcp-agentify stderr: ${data}`);
-  });
-
-  connection.listen();
-
-  const initParams: InitializeParams = {
-    processId: process.pid || null,
-    clientInfo: { name: "MyClientIDE", version: "1.0.0" },
-    rootUri: null,
-    capabilities: {},
-    initializationOptions: {
-      // OPENAI_API_KEY: "sk-client_provided_key", // Can be provided here
-      logLevel: "debug", // Desired log level for the gateway
-      // DEBUG_PORT: 3001, // Optional: to enable debug UI for the gateway
-      backends: [
-        {
-          id: "filesystem", // Must match tool name for LLM
-          type: "stdio",    // PoC only supports stdio
-          command: "npx",    // Command to run the backend MCP server
-          args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed_dir1", "/path/to/allowed_dir2"],
-          // env: { "CUSTOM_ENV_VAR": "value" } // Optional env vars for this backend
-        },
-        {
-          id: "mcpBrowserbase",
-          type: "stdio",
-          command: "npx", 
-          args: ["-y", "@smithery/cli@latest", "run", "@browserbasehq/mcp-browserbase", "--key", "YOUR_BROWSERBASE_API_KEY_HERE"], // API key passed as arg
-          // env: { "BROWSERBASE_API_KEY": "YOUR_KEY_HERE" } // Or passed via env to backend
-        }
+```json
+{
+  "logLevel": "debug",
+  "OPENAI_API_KEY": "sk-YourOpenAIKeyFromASecureSource", // Or rely on .env on the server
+  "DEBUG_PORT": 3001,
+  "backends": [
+    {
+      "id": "filesystem",
+      "displayName": "Local Filesystem",
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}", // IDE might substitute this with the current project path
+        "/tmp/shared_work_area"
+      ],
+      "env": { 
+        "FILESYSTEM_LOG_LEVEL": "info"
+      }
+    },
+    {
+      "id": "mcpBrowserbase",
+      "displayName": "Web Browser via Browserbase",
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y", 
+        "@smithery/cli@latest", 
+        "run", 
+        "@browserbasehq/mcp-browserbase", 
+        "--key", "bb_api_YOUR_BROWSERBASE_KEY" // Ensure this key is securely managed
       ]
     }
-  };
-
-  try {
-    const result: InitializeResult = await connection.sendRequest('initialize', initParams);
-    console.log('mcp-agentify initialized:', result.serverInfo);
-    return connection; // Use this connection for further requests
-  } catch (error) {
-    console.error('Failed to initialize mcp-agentify:', error);
-    connection.dispose();
-    agentifyProcess.kill();
-    return null;
-  }
+    // Add other configured backend tools here
+  ]
 }
+```
+
+**Explanation for IDE Users:**
+*   You would typically find a setting in your IDE (e.g., Cursor, Windsurf) where you specify the command to run `mcp-agentify` (e.g., `npx mcp-agentify` or the path to the executable) and a place to input the JSON blob for `initializationOptions`.
+*   The IDE sends these options to `mcp-agentify` when it starts the server as part of the standard MCP `initialize` request.
+*   Variables like `${workspaceFolder}` are often placeholders that the IDE will replace with actual values from your current project context.
+*   Ensure any API keys (like `OPENAI_API_KEY` or Browserbase keys) are handled securely according to your IDE's recommendations (e.g., using environment variables set for the IDE, or its own secret management if available). If `OPENAI_API_KEY` is set in `mcp-agentify`'s `.env` file (see "Configuration" section), it will take precedence.
+
+*(For developers building a custom client that programmatically spawns and connects to `mcp-agentify`, the following conceptual TypeScript snippet shows how these options would be part of the `InitializeParams` sent via `connection.sendRequest('initialize', initParams);` The `initializationOptions` object shown above would be assigned to `initParams.initializationOptions`.)*
+
+```typescript
+// Conceptual: How a custom client might send these options
+// import type { InitializeParams } from 'vscode-languageserver-protocol';
+// const initParams: InitializeParams = {
+//   processId: process.pid || null,
+//   clientInfo: { name: "MyCustomClient", version: "1.0.0" },
+//   rootUri: null,
+//   capabilities: {},
+//   initializationOptions: { /* JSON object from above goes here */ }
+// };
+// await connection.sendRequest('initialize', initParams);
 ```
 
 ### Orchestrating Tasks via `agentify/orchestrateTask`
