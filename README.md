@@ -125,49 +125,43 @@ You need to tell your IDE:
 {
   "mcpServers": [
     {
-      "id": "mcp-agentify-dev",
-      "name": "mcp-agentify (Local Dev)",
-      "type": "stdio",
-      "command": "/full/path/to/mcp-agentify/scripts/dev.sh", 
-      "workingDirectory": "/full/path/to/mcp-agentify",
-      "env": {
-        "OPENAI_API_KEY": "sk-YourActualOpenAIKeyFromIDESettings",
-        "LOG_LEVEL": "trace",
-        "DEBUG_PORT": "3030"
-      },
-      "initializationOptions": {
-        "backends": [
-          {
-            "id": "filesystem",
-            "displayName": "Local Filesystem (Agentify)",
-            "type": "stdio",
-            "command": "npx",
-            "args": [
-              "-y",
-              "@modelcontextprotocol/server-filesystem",
-              "${workspaceFolder}" 
-            ],
-            "env": {
-              "FILESYSTEM_LOG_LEVEL": "info"
+      "mcp-agentify": {
+        "type": "stdio",
+        "command": "/Users/steipete/Projects/mcp-agentify/scripts/dev.sh",
+        "env": {
+          "logLevel": "trace",
+          "DEBUG_PORT": 3030,
+          "OPENAI_API_KEY": "sk-YourOpenAIKeyFromIDESettingsPlaceholder"
+        },
+        "initializationOptions": {
+          "backends": [
+            {
+              "id": "filesystem",
+              "displayName": "Local Filesystem (Agentify)",
+              "type": "stdio",
+              "command": "npx",
+              "args": [
+                "-y",
+                "@modelcontextprotocol/server-filesystem",
+                "${workspaceFolder}"
+              ]
+            },
+            {
+              "id": "mcpBrowserbase",
+              "displayName": "Web Browser (Browserbase via Agentify)",
+              "type": "stdio",
+              "command": "npx",
+              "args": [
+                "-y",
+                "@smithery/cli@latest",
+                "run",
+                "@browserbasehq/mcp-browserbase",
+                "--key",
+                "YOUR_BROWSERBASE_KEY_IF_NEEDED"
+              ]
             }
-          },
-          {
-            "id": "mcpBrowserbase",
-            "displayName": "Web Browser (Browserbase via Agentify)",
-            "type": "stdio",
-            "command": "npx",
-            "args": [
-              "-y",
-              "@smithery/cli@latest",
-              "run",
-              "@browserbasehq/mcp-browserbase",
-              "--key", "bb_api_YOUR_BROWSERBASE_KEY_FROM_IDE"
-            ]
-          }
-        ],
-        "OPENAI_API_KEY": "sk-FallbackOpenAIKeyIfEnvNotSetByIDE",
-        "LOG_LEVEL": "debug",
-        "DEBUG_PORT": 3001
+          ]
+        }
       }
     }
     // ... other MCP server configurations ...
@@ -175,7 +169,7 @@ You need to tell your IDE:
 }
 ```
 **Key Points for IDE Configuration:**
-*   The IDE's `env` block for the `mcp-agentify` server is crucial for setting its core operational parameters like `OPENAI_API_KEY` and `DEBUG_PORT` (for immediate debug UI).
+*   The IDE's `env` block for the `mcp-agentify` server is crucial for setting its core operational parameters like `OPENAI_API_KEY`, `logLevel`, and `DEBUG_PORT` (for immediate debug UI).
 *   `initializationOptions` is mainly for defining the `backends` array.
 *   Use placeholders like `${workspaceFolder}` if your IDE supports them.
 
