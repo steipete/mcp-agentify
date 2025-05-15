@@ -9,6 +9,7 @@ import type { BackendManager } from './backendManager'; // For future use in API
 import type { GatewayOptions, LogEntry, McpTraceEntry } from './interfaces'; // Corrected
 import type { GatewayClientInitOptions } from './schemas'; // Import from schemas
 import { Writable } from 'node:stream'; // Import Writable
+import type { McpRequester } from './server'; // Corrected import path assuming server.ts is in the same directory
 
 // Forward declaration for types used by LogBuffer/TraceBuffer if they are complex
 
@@ -25,6 +26,7 @@ export class DebugWebServer {
     private initialEnvConfig?: Partial<GatewayOptions>;
     private clientSentInitOptions?: GatewayClientInitOptions; // Store the validated client options
     private finalEffectiveConfig?: GatewayOptions;
+    private mcpRequester?: McpRequester;
 
     // In-memory buffers for logs and traces
     private logBuffer: LogEntry[] = [];
@@ -34,17 +36,14 @@ export class DebugWebServer {
     constructor(
         port: number,
         mainLogger: PinoLoggerBase<PinoLogLevel>,
-        backendManager?: BackendManager,
-        // This gatewayOptions is the initial config based on ENV or defaults when DWS starts early
-        initialConfig?: Partial<GatewayOptions>, 
+        // backendManager is now passed via a setter after BackendManager is fully initialized
+        initialBackendManager?: BackendManager, // Keep it optional in constructor for early start
+        initialConfig?: Partial<GatewayOptions>,
     ) {
         this.port = port;
         this.logger = mainLogger.child({ component: 'DebugWebServer' });
-        this.backendManager = backendManager;
-        // Store the initial config (likely from ENV vars if DWS starts early)
+        this.backendManager = initialBackendManager; // Can be undefined
         this.initialEnvConfig = initialConfig ? this.sanitizePartialConfig(initialConfig) : undefined;
-        // this.gatewayOptions was used for /api/config, let's keep it for that specific purpose (showing what DWS *thinks* is current)
-        // For now, let's make this.gatewayOptions be the final effective config when available, or initial if not updated.
         this.gatewayOptions = initialConfig ? this.sanitizePartialConfig(initialConfig) as GatewayOptions : undefined;
 
         this.app = express();
@@ -267,6 +266,36 @@ export class DebugWebServer {
             });
         };
         this.app.get('/api/traces', tracesHandler);
+
+        // New endpoint for ChatTab to send requests to dynamic agents
+        const chatWithAgentHandler: RequestHandler = async (req, res, next) => {
+            const { agentMethod, params } = req.body as { agentMethod: string; params: { query: string; context?: any } };
+            this.logger.info({ agentMethod, params }, '[DebugWebServer] Received /api/chat-with-agent request.');
+
+            if (!this.mcpRequester) {
+                this.logger.error('[DebugWebServer] McpRequester not available for /api/chat-with-agent.');
+                res.status(503).json({ error: 'MCP Requester not available. Gateway might still be initializing.' });
+                return;
+            }
+            if (!agentMethod || !params || typeof params.query !== 'string') {
+                 res.status(400).json({ error: 'Invalid request: agentMethod and params.query are required.' });
+                 return;
+            }
+
+            try {
+                const result = await this.mcpRequester(agentMethod, params);
+                this.logger.info({ agentMethod, result }, '[DebugWebServer] Response from internal MCP request for agent chat.');
+                res.json(result);
+            } catch (error: any) {
+                this.logger.error({ err: error, agentMethod }, '[DebugWebServer] Error calling agent via mcpRequester.');
+                res.status(500).json({ 
+                    error: 'Failed to call agent', 
+                    message: error.message, 
+                    details: error.data 
+                });
+            }
+        };
+        this.app.post('/api/chat-with-agent', express.json(), chatWithAgentHandler);
     }
 
     private setupWebSockets(): void {
@@ -378,5 +407,16 @@ export class DebugWebServer {
         this.finalEffectiveConfig = this.sanitizeConfig(config); // sanitizeConfig expects full GatewayOptions
         // Update the general this.gatewayOptions for the /api/config endpoint to reflect the latest final config
         this.gatewayOptions = this.finalEffectiveConfig;
+    }
+
+    public setMcpRequester(requester: McpRequester): void {
+        this.logger.info('[DebugWebServer] McpRequester received.');
+        this.mcpRequester = requester;
+    }
+
+    public setBackendManager(manager: BackendManager): void {
+        this.logger.info('[DebugWebServer] BackendManager received.');
+        this.backendManager = manager; 
+        // Potentially re-fetch/update status if UI is already loaded and needs new backend states
     }
 }

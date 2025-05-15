@@ -37,6 +37,11 @@ let internalGatewayOptions: GatewayOptions; // Renamed for clarity, this is the 
 let backendManager: BackendManager | undefined;
 let llmOrchestrator: LLMOrchestratorService | undefined;
 let debugWebServerInstance: DebugWebServer | undefined;
+let mcpConnection: MessageConnection | undefined; // Store the connection
+
+// Expose a function to send requests on the main MCP connection
+export type McpRequester = (method: string, params: any) => Promise<any>;
+let mcpRequester: McpRequester | undefined;
 
 const tempConsoleLogger = {
     error: (message: string) => console.error(`[TEMP ERROR] ${message}`),
@@ -127,6 +132,22 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
         process.stdout,
         tempConsoleLogger as any,
     );
+    mcpConnection = connection; // Assign to module-scoped variable
+
+    // Define the requester function
+    mcpRequester = async (method: string, params: any) => {
+        if (!mcpConnection) {
+            pinoLogger.error('MCP connection not available for mcpRequester.');
+            throw new Error('MCP connection not available');
+        }
+        pinoLogger.info({ method, params }, '[mcpRequester] Sending request via main connection.');
+        return mcpConnection.sendRequest(method, params);
+    };
+
+    // Pass the mcpRequester to DebugWebServer if it exists
+    if (debugWebServerInstance && typeof debugWebServerInstance.setMcpRequester === 'function') {
+        debugWebServerInstance.setMcpRequester(mcpRequester);
+    }
 
     // Dynamically register agent methods based on AGENTS from environment
     if (internalGatewayOptions.gptAgents && internalGatewayOptions.gptAgents.length > 0) {
@@ -311,6 +332,12 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     );
                 }
 
+                // After all initializations, if debugWebServerInstance exists and needs the requester again (e.g. if re-created)
+                if (debugWebServerInstance && mcpRequester && typeof debugWebServerInstance.setMcpRequester === 'function') {
+                     // This might be redundant if already set, but ensures it has it.
+                    // debugWebServerInstance.setMcpRequester(mcpRequester);
+                }
+                
                 pinoLogger.info(
                     '[GATEWAY SERVER] SUCCESSFULLY COMPLETED ALL INITIALIZATION LOGIC. ABOUT TO RETURN InitializeResult.',
                 );
