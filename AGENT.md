@@ -1,8 +1,8 @@
-{
-  "semi": true,
-  "trailingComma": "all",
-  "singleQuote": true,
-  "printWidth": 120,
+---
+description: Core agent guidelines for mcp-agentify development. This is the primary, always-applied rule set.
+alwaysApply: true
+---
+
 # Core Agent Instructions & Guidelines
 
 ## I. Overall Behavior & Principles
@@ -33,19 +33,15 @@
 -   **Playwright Tools:**
     -   **Fresh Test Sessions:** After server restarts or frontend rebuilds, ALWAYS call `playwright_close` *before* `playwright_navigate` to ensure a completely fresh browser context and avoid issues with stale cached page states.
     -   (See `@debugging_frontend_e2e` for more on frontend caching).
--   **`edit_file` Tool:**
-    -   Be precise. Use `// ... existing code ...` for unchanged sections.
-    -   Provide clear, concise `instructions` for the edit.
-    -   If `edit_file` struggles with complex changes, consider reading the file, reconstructing the full desired content, and then using `mcp_filesystem_write_file` to overwrite it (if path permissions allow, otherwise use `edit_file` with full content replacement).
+-   **`edit_file` Tool (Use with Caution for Full Overwrites):**
+    -   For precise changes, use with `// ... existing code ...`.
+    -   If replacing entire content, ensure the `code_edit` field contains the *complete new file content*. For large overwrites, `mcp_filesystem_write_file` is generally safer if path permissions allow, but we found it was restricted for `.cursor/rules/`. So, `edit_file` with full content is the fallback.
 
 ## IV. Debugging Strategies
 
 -   **UI Not Updating After Backend Changes?**
     1.  Strongly suspect frontend build/browser caching.
-    2.  Request a full frontend rebuild:
-        -   Delete `.parcel-cache` and `frontend/.parcel-cache`.
-        -   Delete `frontend/public` (or other dist dir).
-        -   Run the build script (e.g., `npm run build:ui`).
+    2.  Request a full frontend rebuild (delete caches like `.parcel-cache`, `frontend/public`, then run build script e.g., `npm run build:ui`).
     3.  When testing with Playwright, **always** use `playwright_close` before `playwright_navigate`.
     4.  (Detailed steps: `@debugging_frontend_e2e`).
 -   **API Request Failures (e.g., UI -> Server, HTTP 400/500):**
@@ -53,12 +49,12 @@
     2.  Log raw `req.body`/`req.headers` at server API endpoint start.
     3.  Log parsed params after server endpoint parsing.
     4.  Trace calls to internal services (e.g., `LLMOrchestratorService`), logging input and output.
-    5.  **Crucially, ensure services are initialized & passed to handlers *before* requests can arrive.** Prefer constructor injection of dependencies for server-side components like `FrontendServer`.
+    5.  **Crucially, ensure services are initialized & passed to handlers *before* requests can arrive.** Prefer constructor injection.
     6.  (Detailed workflow for this: `@debugging_frontend_e2e`).
 
 ## V. Code Style & Conventions
 
--   **Formatting:** Adhere to the project's Prettier configuration. For reference, the active Prettier config (previously the sole content of this file) is:
+-   **Formatting:** Adhere to the project's Prettier configuration. The reference config is:
     ```json
     {
       "semi": true,
@@ -68,16 +64,28 @@
       "tabWidth": 4
     }
     ```
--   **Comments:** Provide clear, concise comments for non-obvious code. Avoid over-commenting.
--   **Error Handling:** Implement robust error handling. Catch errors, log them with context, and return meaningful error responses to clients or calling functions.
+-   **Comments:** Clear, concise comments for non-obvious code. Avoid over-commenting.
+-   **Error Handling:** Implement robust error handling. Log with context, return meaningful error responses.
 
 ## VI. Task Management & Workflow (If using Task Master)
 
-- Refer to `@dev_workflow` for detailed processes on using Task Master tools (e.g., `get_tasks`, `next_task`, `expand_task`, `set_task_status`).
-- Prioritize MCP server tools over CLI commands when available.
+- Refer to `@dev_workflow` for detailed processes.
+- Prioritize MCP server tools over CLI commands.
 
 ## VII. Updating These Guidelines
 - This process is defined in `@update_agent_guidelines`.
-- After significant debugging sessions or new patterns emerge, suggest a review to incorporate learnings.
+- After significant debugging sessions or new patterns emerge, suggest a review.
+
+## VIII. Version Control & Committing
+
+- **Committing Changes Instruction ("commit"):**
+  - When instructed to "commit," identify all uncommitted (dirty) files (`git status`).
+  - Group these changes into logical commits. If multiple distinct features or fixes are present, create separate commits for each.
+  - For each logical chunk:
+      - Stage the relevant files (`git add <file1> <file2> ...`).
+      - Formulate a clear, descriptive commit message (e.g., `feat: ...`, `fix: ...`, `docs: ...`).
+      - Commit the staged changes (`git commit -m "..."`).
+  - After all logical commits are made, **always** run `git push` to push all new local commits to the remote branch.
+  - Report the outcome of the push.
 
 ---
