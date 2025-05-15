@@ -5,16 +5,19 @@ import 'dotenv/config'; // Load .env file at the very top
 // Earliest possible point to check raw environment variable
 console.error(`[CLI PRE-INIT] Script CWD: ${process.cwd()}`);
 // Log both cases for LOG_LEVEL for clarity during this debugging phase
-console.error(`[CLI PRE-INIT] Raw  vprocess.env.LOG_LEVEL (uppercase): ${process.env.LOG_LEVEL}`); 
+console.error(`[CLI PRE-INIT] Raw process.env.LOG_LEVEL (uppercase): ${process.env.LOG_LEVEL}`); 
 console.error(`[CLI PRE-INIT] Raw process.env.logLevel (lowercase): ${process.env.logLevel}`); 
 console.error(`[CLI PRE-INIT] Raw process.env.FRONTEND_PORT: ${process.env.FRONTEND_PORT}`);
+
 const apiKey = process.env.OPENAI_API_KEY;
-if (apiKey) {
+if (apiKey && apiKey.length > 10) { // Ensure key is long enough to get first 5 and last 5
     const first5 = apiKey.substring(0, 5);
     const last5 = apiKey.substring(apiKey.length - 5);
     console.error(`[CLI PRE-INIT] Raw process.env.OPENAI_API_KEY: ${first5}.....${last5} (Length: ${apiKey.length})`);
+} else if (apiKey) { // Key is present but too short
+    console.error(`[CLI PRE-INIT] Raw process.env.OPENAI_API_KEY: *** (Length: ${apiKey.length}, too short to display parts)`);
 } else {
-    console.error(`[CLI PRE-INIT] Raw process.env.OPENAI_API_KEY: undefined`);
+    console.error('[CLI PRE-INIT] Raw process.env.OPENAI_API_KEY: undefined');
 }
 console.error(`[CLI PRE-INIT] Raw process.env.AGENTS: ${process.env.AGENTS}`);
 
