@@ -10,6 +10,7 @@ import type { GatewayOptions, LogEntry, McpTraceEntry } from './interfaces'; // 
 import type { GatewayClientInitOptions } from './schemas'; // Import from schemas
 import { Writable } from 'node:stream'; // Import Writable
 import type { McpRequester } from './server'; // Corrected import path assuming server.ts is in the same directory
+import { getPackageVersion } from './utils'; // Import from new utils.ts
 
 // Forward declaration for types used by LogBuffer/TraceBuffer if they are complex
 
@@ -266,6 +267,19 @@ export class FrontendServer {
             });
         };
         this.app.get('/api/traces', tracesHandler);
+
+        // New endpoint for gateway version
+        const gatewayVersionHandler: RequestHandler = (req, res) => {
+            this.logger.debug('Request received for /api/gateway-version');
+            try {
+                const version = getPackageVersion();
+                res.json({ version });
+            } catch (error: any) {
+                this.logger.error({ err: error }, 'Error fetching gateway version for API.');
+                res.status(500).json({ error: 'Failed to retrieve gateway version', message: error.message });
+            }
+        };
+        this.app.get('/api/gateway-version', gatewayVersionHandler);
 
         // New endpoint for ChatTab to send requests to dynamic agents
         const chatWithAgentHandler: RequestHandler = async (req, res, next) => {

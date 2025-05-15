@@ -1,4 +1,5 @@
 import { h } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
 import { TabsComponent } from './components/TabsComponent';
 import { StatusTab } from './components/StatusTab';
 import { ConfigDetailsTab } from './components/ConfigDetailsTab';
@@ -12,6 +13,24 @@ import { ChatTab } from './components/ChatTab';
 // import './style.css'; 
 
 export function App() {
+    const [gatewayVersion, setGatewayVersion] = useState<string>('loading...');
+
+    useEffect(() => {
+        fetch('/api/gateway-version')
+            .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch version'))
+            .then(data => {
+                if (data && data.version) {
+                    setGatewayVersion(data.version);
+                } else {
+                    setGatewayVersion('N/A');
+                }
+            })
+            .catch(err => {
+                console.error('Error fetching gateway version:', err);
+                setGatewayVersion('Error');
+            });
+    }, []);
+
     const tabs = [
         { id: 'status', name: 'Status & Config', content: <StatusTab /> },
         { id: 'configDetails', name: 'Config Details', content: <ConfigDetailsTab /> },
@@ -30,7 +49,7 @@ export function App() {
                 <TabsComponent tabs={tabs} />
             </main>
             <footer>
-                <p>MCP Agentify Status: <span id="footer-status">UI Loaded</span></p>
+                <p>MCP Agentify Status: <span id="footer-status">UI Loaded</span> | Version: <span id="gateway-version">{gatewayVersion}</span></p>
             </footer>
         </div>
     );
