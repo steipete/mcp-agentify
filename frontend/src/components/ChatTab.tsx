@@ -23,35 +23,108 @@ export function ChatTab() {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Fetch available dynamic agents
+    // Fetch available dynamic agents with basic retry (handles early 503)
     useEffect(() => {
-        fetch('/api/config-details')
-            .then(res => res.ok ? res.json() : Promise.reject(new Error(`API error: ${res.status}`)))
-            .then(data => {
-                const effectiveConfig = data?.finalEffectiveConfig || data?.initialEnvConfig;
-                if (effectiveConfig && effectiveConfig.gptAgents && Array.isArray(effectiveConfig.gptAgents)) {
-                    const availableAgents = effectiveConfig.gptAgents.map((fullAgentString: string) => {
-                        const sanitizedMethodPart = fullAgentString.replace(/[^a-zA-Z0-9_\/]/g, '_').replace(/\//g, '_');
-                        return {
-                            id: sanitizedMethodPart, // Use sanitized part for a React key
-                            displayName: fullAgentString,
-                            methodName: `agentify/agent_${sanitizedMethodPart}`
-                        };
-                    });
-                    setAgents(availableAgents);
-                    if (availableAgents.length > 0) {
-                        setSelectedAgent(availableAgents[0].methodName);
+        const fetchAgents = (attempt = 0) => {
+            fetch('/api/config-details')
+                .then(res => {
+                    if (!res.ok) {
+                        console.error(
+                            'ChatTab: API call to /api/config-details failed with status:',
+                            res.status,
+                        );
+                        return res.text().then(text => { // Try to get error text
+                            throw new Error(`API error ${res.status}: ${text || 'No error message'}`);
+                        });
                     }
-                }
-            })
-            .catch(err => {
-                console.error('Error fetching agent list:', err);
-                setError('Could not load agent list.');
-            });
+                    return res.json();
+                })
+                .then(data => {
+                    console.log(
+                        'ChatTab: Received data from /api/config-details:',
+                        JSON.stringify(data, null, 2),
+                    ); // Log the entire raw data
+
+                    let agentsListToProcess: string[] = [];
+                    
+                    if (data?.finalEffectiveConfig?.gptAgents && Array.isArray(data.finalEffectiveConfig.gptAgents) && data.finalEffectiveConfig.gptAgents.length > 0) {
+                        agentsListToProcess = data.finalEffectiveConfig.gptAgents;
+                        console.log(
+                            'ChatTab: Using gptAgents from finalEffectiveConfig:',
+                            JSON.stringify(agentsListToProcess),
+                        );
+                    } 
+                    else if (data?.initialEnvConfig?.gptAgents && Array.isArray(data.initialEnvConfig.gptAgents) && data.initialEnvConfig.gptAgents.length > 0) {
+                        agentsListToProcess = data.initialEnvConfig.gptAgents;
+                        console.log(
+                            'ChatTab: Using gptAgents from initialEnvConfig:',
+                            JSON.stringify(agentsListToProcess),
+                        );
+                    } else {
+                        console.warn('ChatTab: No gptAgents array found or array is empty in both finalEffectiveConfig and initialEnvConfig.');
+                        // Log the relevant parts of the config to see why it's empty
+                        if (data?.finalEffectiveConfig) {
+                            console.log(
+                                'ChatTab: finalEffectiveConfig.gptAgents:',
+                                JSON.stringify(data.finalEffectiveConfig.gptAgents)
+                            );
+                        }
+                        if (data?.initialEnvConfig) {
+                            console.log(
+                                'ChatTab: initialEnvConfig.gptAgents:', 
+                                JSON.stringify(data.initialEnvConfig.gptAgents), // Ensure this line has a comma if it's not the last arg
+                            );
+                        }
+                    }
+
+                    if (agentsListToProcess.length > 0) {
+                        setError(null); // clear previous error if retry succeeds
+                        const availableAgents = agentsListToProcess.map((fullAgentString: string) => {
+                            const sanitizedMethodPart = fullAgentString.replace(/[^a-zA-Z0-9_\/]/g, '_').replace(/\//g, '_');
+                            return {
+                                id: sanitizedMethodPart, // Use sanitized part for a React key
+                                displayName: fullAgentString,
+                                methodName: `agentify/agent_${sanitizedMethodPart}`
+                            };
+                        });
+                        console.log('ChatTab: Processed availableAgents:', JSON.stringify(availableAgents));
+                        setAgents(availableAgents);
+                        if (availableAgents.length > 0) { // This check is a bit redundant now but harmless
+                            setSelectedAgent(availableAgents[0].methodName);
+                            console.log('ChatTab: Selected agent set to:', availableAgents[0].methodName); 
+                        }
+                    } else {
+                        setAgents([]);
+                        setSelectedAgent('');
+                        console.warn('ChatTab: agentsListToProcess is empty. Setting no agents.'); 
+                    }
+                })
+                .catch((err: any) => {
+                    console.error('ChatTab: Error fetching or processing agent list:', err.message, err.stack);
+                    setError(`Could not load agent list: ${err.message}`);
+                    setAgents([]); // Clear agents on error
+                    setSelectedAgent('');
+                    if (attempt < 2) {
+                        setTimeout(() => fetchAgents(attempt + 1), 1000);
+                    }
+                });
+        };
+
+        fetchAgents();
     }, []);
 
     const handleSendQuery = useCallback(async () => {
-        if (!selectedAgent || !currentQuery.trim()) return;
+        if (!selectedAgent || !currentQuery.trim() || agents.length === 0) {
+            return;
+        }
+
+        const agentToCall = agents.find(agent => agent.methodName === selectedAgent);
+        if (!agentToCall) {
+            setError('Selected agent details not found. Cannot send query.');
+            setIsLoading(false);
+            return;
+        }
+        const agentIdentifierForApi = agentToCall.displayName;
 
         const userMessage: ChatMessage = {
             sender: 'user',
@@ -63,19 +136,21 @@ export function ChatTab() {
         setError(null);
 
         try {
-            const requestBody = {
+            const requestBodyForAgentParams = {
                 query: currentQuery,
                 context: null 
             };
-            setCurrentQuery(''); // Clear input
+            setCurrentQuery(''); 
 
-            // We need a new backend endpoint to proxy this chat message to an internal MCP call
             const response = await fetch('/api/chat-with-agent', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ agentMethod: selectedAgent, params: requestBody }),
+                body: JSON.stringify({ 
+                    agentModelString: agentIdentifierForApi,
+                    params: requestBodyForAgentParams
+                }),
             });
 
             if (!response.ok) {
@@ -92,8 +167,8 @@ export function ChatTab() {
             };
             setChatHistory(prev => [...prev, agentMessage]);
 
-        } catch (err: any) { // Catch as any to access err.message
-            console.error('Error sending agent query:', err);
+        } catch (err: any) { 
+            console.error('ChatTab: Error in handleSendQuery:', err);
             setError(err.message || 'Failed to get response from agent.');
             const errorMessage: ChatMessage = {
                 sender: 'agent',
@@ -104,7 +179,7 @@ export function ChatTab() {
         } finally {
             setIsLoading(false);
         }
-    }, [selectedAgent, currentQuery]);
+    }, [selectedAgent, currentQuery, agents]);
 
     return (
         <div class="tab-content-item" id="chat-section-content">
