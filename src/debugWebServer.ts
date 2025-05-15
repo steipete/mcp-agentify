@@ -1,8 +1,7 @@
 // src/debugWebServer.ts
-import http from 'node:http';
-import express from 'express';
-import type { Request, Response, NextFunction, Application, RequestHandler } from 'express';
-import { WebSocketServer, type WebSocket } from 'ws'; // Import WebSocket type as well for client handling
+import * as http from 'node:http';
+import express, { type Request, type Response, type NextFunction, type Application, type RequestHandler } from 'express';
+import { WebSocketServer, WebSocket } from 'ws'; // Ensure WebSocket is imported as a value
 import type { Logger as PinoLoggerBase } from 'pino'; // Use base type for generic
 import type { PinoLogLevel } from './logger'; // Import the specific level type
 import { resolve } from 'node:path';
@@ -59,7 +58,7 @@ export class DebugWebServer {
                     const logString = chunk.toString();
                     // Pino logs are newline-terminated JSON strings when not using pino-pretty
                     // It's safer to attempt parsing each line if multiple come in a single chunk
-                    for (const line of logString.split('\n').filter(s => s.trim() !== '')) {
+                    for (const line of logString.split('\n').filter((s: string) => s.trim() !== '')) {
                         try {
                             const logObject = JSON.parse(line);
                             // Adapt the parsed pino object to LogEntry.
@@ -160,7 +159,8 @@ export class DebugWebServer {
         const statusHandler: RequestHandler = (req, res) => {
             this.logger.debug('Request received for /api/status');
             if (!this.backendManager) {
-                return res.status(503).json({ status: 'initializing', message: 'BackendManager not yet available.' });
+                res.status(503).json({ status: 'initializing', message: 'BackendManager not yet available.' });
+                return;
             }
             try {
                 const backendStates = this.backendManager.getAllBackendStates();
@@ -181,7 +181,8 @@ export class DebugWebServer {
             this.logger.debug('Request received for /api/config');
             if (!this.gatewayOptions) {
                 // gatewayOptions is sanitized in constructor. If it was never provided, it's undefined.
-                return res.status(404).json({ message: 'Gateway configuration not available or not yet initialized.' });
+                res.status(404).json({ message: 'Gateway configuration not available or not yet initialized.' });
+                return;
             }
             res.json(this.gatewayOptions); // Already sanitized
         };
