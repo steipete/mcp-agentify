@@ -244,70 +244,93 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
     connection.onRequest(
         new RequestType<InitializeParams, InitializeResult, ResponseError<undefined>>('initialize'),
         async (params: InitializeParams, _token: CancellationToken): Promise<InitializeResult> => {
-            pinoLogger.info(
-                { initParamsReceivedClient: params.initializationOptions },
-                "[GATEWAY SERVER] 'initialize' handler: Received options from client."
-            );
-
-            const clientOptionsValidation = GatewayClientInitOptionsSchema.safeParse(params.initializationOptions);
-            if (!clientOptionsValidation.success) {
-                const errorMsg = 'Invalid client initializationOptions structure (backends are required).';
-                pinoLogger.error({ error: clientOptionsValidation.error.format() }, errorMsg);
-                throw new ResponseError(ErrorCodes.InvalidParams, errorMsg, {
-                    validationErrors: clientOptionsValidation.error.format(),
-                });
-            }
-            const clientSentOptions: GatewayClientInitOptions = clientOptionsValidation.data;
-
-            // Update internalGatewayOptions.backends from client
-            internalGatewayOptions.backends = clientSentOptions.backends;
-            
-            if (clientSentOptions.logLevel !== undefined && clientSentOptions.logLevel !== internalGatewayOptions.logLevel) {
-                pinoLogger.warn(
-                    `[GATEWAY SERVER] Client sent logLevel ${clientSentOptions.logLevel}, but gateway is using ${internalGatewayOptions.logLevel} (from env/default).`
+            try {
+                pinoLogger.info(
+                    { initParamsReceivedClient: params.initializationOptions },
+                    "[GATEWAY SERVER] 'initialize' handler: Received options from client."
                 );
-            }
-            if (clientSentOptions.FRONTEND_PORT !== undefined && clientSentOptions.FRONTEND_PORT !== internalGatewayOptions.FRONTEND_PORT) {
-                pinoLogger.warn(
-                    `[GATEWAY SERVER] Client sent FRONTEND_PORT ${clientSentOptions.FRONTEND_PORT}, but gateway is using ${internalGatewayOptions.FRONTEND_PORT} (from env/default). FrontendServer will not change port post-startup.`
-                );
-            }
 
-            if (frontendServerInstance) {
-                frontendServerInstance.setClientSentInitOptions(clientSentOptions); 
-                frontendServerInstance.setFinalEffectiveConfig(internalGatewayOptions); 
+                try {
+                    const clientOptionsValidation = GatewayClientInitOptionsSchema.safeParse(params.initializationOptions);
+                    if (!clientOptionsValidation.success) {
+                        const errorMsg = 'Invalid client initializationOptions structure (backends are required).';
+                        pinoLogger.error({ error: clientOptionsValidation.error.format() }, errorMsg);
+                        throw new ResponseError(ErrorCodes.InvalidParams, errorMsg, {
+                            validationErrors: clientOptionsValidation.error.format(),
+                        });
+                    }
+                    const clientSentOptions: GatewayClientInitOptions = clientOptionsValidation.data;
+
+                    // Update internalGatewayOptions.backends from client
+                    internalGatewayOptions.backends = clientSentOptions.backends;
+                    
+                    if (clientSentOptions.logLevel !== undefined && clientSentOptions.logLevel !== internalGatewayOptions.logLevel) {
+                        pinoLogger.warn(
+                            `[GATEWAY SERVER] Client sent logLevel ${clientSentOptions.logLevel}, but gateway is using ${internalGatewayOptions.logLevel} (from env/default).`
+                        );
+                    }
+                    if (clientSentOptions.FRONTEND_PORT !== undefined && clientSentOptions.FRONTEND_PORT !== internalGatewayOptions.FRONTEND_PORT) {
+                        pinoLogger.warn(
+                            `[GATEWAY SERVER] Client sent FRONTEND_PORT ${clientSentOptions.FRONTEND_PORT}, but gateway is using ${internalGatewayOptions.FRONTEND_PORT} (from env/default). FrontendServer will not change port post-startup.`
+                        );
+                    }
+
+                    if (frontendServerInstance) {
+                        frontendServerInstance.setClientSentInitOptions(clientSentOptions); 
+                        frontendServerInstance.setFinalEffectiveConfig(internalGatewayOptions); 
+                    }
+
+                    if (!internalGatewayOptions.OPENAI_API_KEY) {
+                        const errorMsg = 'OpenAI API Key is required and was not set in environment.';
+                        pinoLogger.error(errorMsg);
+                        throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { 
+                            missingKey: 'OPENAI_API_KEY', 
+                        });
+                    }
+                    
+                    pinoLogger.info(
+                        { finalGatewayConfig: { ...internalGatewayOptions, OPENAI_API_KEY: '***' } },
+                        '[GATEWAY SERVER] Final gateway configuration assembled post-initialize.',
+                    );
+
+                    backendManager = new BackendManager(pinoLogger);
+                    try {
+                        await backendManager.initializeAllBackends(internalGatewayOptions.backends);
+                        if (frontendServerInstance && backendManager && typeof frontendServerInstance.setBackendManager === 'function') {
+                            frontendServerInstance.setBackendManager(backendManager);
+                        }
+                    } catch (backendError) {
+                        pinoLogger.error({ err: backendError }, "[GATEWAY SERVER] Error initializing backends");
+                        // Re-throw to propagate the error
+                        throw backendError;
+                    }
+
+                    llmOrchestrator = new LLMOrchestratorService(
+                        internalGatewayOptions.OPENAI_API_KEY,
+                        internalGatewayOptions.backends,
+                        pinoLogger,
+                    );
+                    pinoLogger.info('[GATEWAY SERVER] LLMOrchestratorService initialized.');
+
+                    pinoLogger.info(
+                        '[GATEWAY SERVER] SUCCESSFULLY COMPLETED ALL INITIALIZATION LOGIC. ABOUT TO RETURN InitializeResult.',
+                    );
+                    return { capabilities: {}, serverInfo: { name: 'mcp-agentify', version: getPackageVersion() } };
+                } catch (innerError) {
+                    // Log the inner error for better debugging
+                    pinoLogger.error({ err: innerError }, "[GATEWAY SERVER] Error in 'initialize' handler inner block");
+                    // Re-throw the error to be caught by the outer try/catch or propagate to client
+                    throw innerError;
+                }
+            } catch (error) {
+                pinoLogger.error({ err: error }, "[GATEWAY SERVER] Unhandled error in 'initialize' handler");
+                // If it's already a ResponseError, throw it directly
+                if (error instanceof ResponseError) {
+                    throw error;
+                }
+                // Otherwise, wrap it in a ResponseError
+                throw new ResponseError(ErrorCodes.InternalError, `Internal server error during initialization: ${(error as Error).message}`);
             }
-
-            if (!internalGatewayOptions.OPENAI_API_KEY) {
-                const errorMsg = 'OpenAI API Key is required and was not set in environment.';
-                pinoLogger.error(errorMsg);
-                throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { 
-                    missingKey: 'OPENAI_API_KEY', 
-                });
-            }
-            
-            pinoLogger.info(
-                { finalGatewayConfig: { ...internalGatewayOptions, OPENAI_API_KEY: '***' } },
-                '[GATEWAY SERVER] Final gateway configuration assembled post-initialize.',
-            );
-
-            backendManager = new BackendManager(pinoLogger);
-            await backendManager.initializeAllBackends(internalGatewayOptions.backends);
-            if (frontendServerInstance && backendManager && typeof frontendServerInstance.setBackendManager === 'function') {
-                frontendServerInstance.setBackendManager(backendManager);
-            }
-
-            llmOrchestrator = new LLMOrchestratorService(
-                internalGatewayOptions.OPENAI_API_KEY,
-                internalGatewayOptions.backends,
-                pinoLogger,
-            );
-            pinoLogger.info('[GATEWAY SERVER] LLMOrchestratorService initialized.');
-
-            pinoLogger.info(
-                '[GATEWAY SERVER] SUCCESSFULLY COMPLETED ALL INITIALIZATION LOGIC. ABOUT TO RETURN InitializeResult.',
-            );
-            return { capabilities: {}, serverInfo: { name: 'mcp-agentify', version: getPackageVersion() } };
         }
     );
 

@@ -74,23 +74,40 @@ describe('Gateway Integration Tests', { timeout: INTEGRATION_TEST_TIMEOUT }, () 
             },
         });
 
-        if (!gatewayProcess || !gatewayProcess.stdout || !gatewayProcess.stdin) {
+        if (!gatewayProcess || !gatewayProcess.stdout || !gatewayProcess.stdin || !gatewayProcess.stderr) {
             throw new Error('Failed to spawn gateway process or access its stdio.');
         }
 
         gatewayProcess.on('error', (err) => {
             console.error('[TEST SETUP] Gateway process spawn error:', err);
         });
+        
+        // Capture stderr for debugging
+        let stderrOutput = '';
+        gatewayProcess.stderr.on('data', (data) => {
+            const output = data.toString();
+            stderrOutput += output;
+            console.error(`[GATEWAY STDERR]: ${output.trim()}`);
+        });
+        
+        // Capture stdout for debugging
+        let stdoutOutput = '';
+        gatewayProcess.stdout.on('data', (data) => {
+            stdoutOutput += data.toString();
+        });
 
         let gatewayReady = false;
         const readyPromise = new Promise<void>((resolveReady, rejectReady) => {
             const readyTimeout = setTimeout(() => {
-                if (!gatewayReady) rejectReady(new Error('Gateway readiness log message timeout'));
+                if (!gatewayReady) {
+                    console.error('[TEST SETUP] Gateway readiness timeout. stderr collected:', stderrOutput);
+                    console.error('[TEST SETUP] stdout collected:', stdoutOutput);
+                    rejectReady(new Error('Gateway readiness log message timeout'));
+                }
             }, INTEGRATION_TEST_TIMEOUT - 3000);
 
             gatewayProcess?.stderr?.on('data', (data) => {
                 const output = data.toString();
-                console.error(`[GATEWAY STDERR]: ${output.trim()}`); // Continue logging all stderr
                 if (output.includes('mcp-agentify server logic started. Listening for client connection via stdio')) {
                     if (!gatewayReady) {
                         gatewayReady = true;
@@ -145,7 +162,7 @@ describe('Gateway Integration Tests', { timeout: INTEGRATION_TEST_TIMEOUT }, () 
         expect(gatewayProcess?.pid).toBeGreaterThan(0);
         expect(clientConnection).toBeDefined();
     });
-
+    
     describe('Simple Ping Request', () => {
         it('should respond to ping with pong', async () => {
             if (!clientConnection) throw new Error('Client connection not available');
@@ -206,9 +223,14 @@ describe('Gateway Integration Tests', { timeout: INTEGRATION_TEST_TIMEOUT }, () 
                     },
                 };
                 // Expect success because the gateway's env should provide the API key.
-                const result: InitializeResult = await clientConnection.sendRequest('initialize', initParams);
-                expect(result).toBeDefined();
-                expect(result.serverInfo?.name).toBe('mcp-agentify');
+                try {
+                    const result: InitializeResult = await clientConnection.sendRequest('initialize', initParams);
+                    expect(result).toBeDefined();
+                    expect(result.serverInfo?.name).toBe('mcp-agentify');
+                } catch (error) {
+                    console.error('Initialize with env API key failed:', error);
+                    throw error;
+                }
             },
             INTEGRATION_TEST_TIMEOUT,
         );
