@@ -9,15 +9,15 @@ import type {
     InitializeParams, // From LSP
     InitializeResult, // From LSP
     ServerCapabilities,
+    CancellationToken,
 } from 'vscode-languageserver-protocol';
-import type { CancellationToken } from 'vscode-jsonrpc';
 
 import type { Logger as PinoLoggerType } from 'pino';
-import { initializeLogger, getLogger, PinoLogLevel } from './logger';
+import { initializeLogger, getLogger, type PinoLogLevel } from './logger';
 import { BackendManager } from './backendManager';
 import { LLMOrchestratorService } from './llmOrchestrator';
 import { DebugWebServer } from './debugWebServer';
-import type { GatewayOptions, AgentifyOrchestrateTaskParams, Plan } from './interfaces';
+import type { GatewayOptions, AgentifyOrchestrateTaskParams, Plan, McpTraceEntry } from './interfaces';
 import { GatewayOptionsSchema, AgentifyOrchestrateTaskParamsSchema } from './schemas';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -105,7 +105,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
 
     connection.onRequest(
         new RequestType<InitializeParams, InitializeResult, ResponseError<undefined>>('initialize'),
-        async (params: InitializeParams, token: CancellationToken): Promise<InitializeResult> => {
+        async (params: InitializeParams, _token: CancellationToken): Promise<InitializeResult> => {
             const handlerLogger = pinoLogger || tempConsoleLogger;
             handlerLogger.info({ initParamsReceived: params }, "[GATEWAY SERVER] 'initialize' handler started.");
             try {
@@ -132,7 +132,45 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     tempConsoleLogger.error(errorMsg);
                     throw new ResponseError(ErrorCodes.InvalidParams, errorMsg, { missingKey: 'OPENAI_API_KEY' });
                 }
-                pinoLogger = initializeLogger({ logLevel: gatewayOptions.logLevel as PinoLogLevel });
+
+                // Initialize DebugWebServer first if port is specified, to get its log stream
+                if (gatewayOptions.DEBUG_PORT && gatewayOptions.DEBUG_PORT > 0) {
+                    pinoLogger = initializeLogger(
+                        { logLevel: gatewayOptions.logLevel as PinoLogLevel },
+                        undefined,
+                        undefined,
+                    );
+                    pinoLogger.info(
+                        `[GATEWAY SERVER] Debug port ${gatewayOptions.DEBUG_PORT} specified. Initializing DebugWebServer early. Logger temporarily initialized. `,
+                    );
+                    try {
+                        debugWebServerInstance = new DebugWebServer(
+                            gatewayOptions.DEBUG_PORT,
+                            pinoLogger, // Pass the temporary logger
+                            undefined, // BackendManager not yet initialized
+                            gatewayOptions,
+                        );
+                        debugWebServerInstance.start();
+                        pinoLogger.info('[GATEWAY SERVER] DebugWebServer started with temp logger.');
+                    } catch (err: unknown) {
+                        pinoLogger.error({ err }, '[GATEWAY SERVER] Failed to start DebugWebServer during early init.');
+                        // Decide if this is fatal or not. For PoC, maybe continue without debug UI.
+                    }
+                }
+
+                // Now initialize the logger properly, potentially with the debug stream
+                const debugStreamForPino = debugWebServerInstance?.getLogStream();
+                pinoLogger = initializeLogger(
+                    { logLevel: gatewayOptions.logLevel as PinoLogLevel },
+                    undefined,
+                    debugStreamForPino,
+                );
+                // If DebugWebServer was initialized, its internal logger needs to be updated to the final pinoLogger
+                if (debugWebServerInstance) {
+                    debugWebServerInstance.updateLogger(pinoLogger);
+                    pinoLogger.info('[GATEWAY SERVER] DebugWebServer logger updated to final instance.');
+                }
+
                 pinoLogger.info(
                     { gatewayOptions: { ...gatewayOptions, OPENAI_API_KEY: '***' } },
                     '[GATEWAY SERVER] Options processed. Logger initialized.',
@@ -142,6 +180,12 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                 try {
                     await backendManager.initializeAllBackends(gatewayOptions.backends);
                     pinoLogger.info('[GATEWAY SERVER] BackendManager initialized all backends successfully.');
+                    // Listen for MCP traces from BackendManager
+                    backendManager.on('mcpTrace', (traceEntry: McpTraceEntry) => {
+                        if (debugWebServerInstance) {
+                            debugWebServerInstance.addMcpTrace(traceEntry);
+                        }
+                    });
                 } catch (err: unknown) {
                     const backendInitErrorMsg = `Critical error during BackendManager initialization: ${(err as Error).message}`;
                     pinoLogger.error({ err }, `[GATEWAY SERVER] ${backendInitErrorMsg}`);
@@ -202,10 +246,23 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
         'agentify/orchestrateTask',
         async (
             requestParams: AgentifyOrchestrateTaskParams,
-            cancellationToken: CancellationToken,
+            _cancellationToken: CancellationToken,
             rpcMessage?: RequestMessage,
         ) => {
             const handlerLogger = getLogger();
+            // Add MCP trace for incoming request to gateway
+            if (debugWebServerInstance && rpcMessage) {
+                const traceEntry: McpTraceEntry = {
+                    timestamp: Date.now(),
+                    direction: 'INCOMING_TO_GATEWAY',
+                    backendId: undefined, // Not applicable for client to gateway request
+                    id: rpcMessage.id !== undefined ? String(rpcMessage.id) : undefined,
+                    method: rpcMessage.method,
+                    paramsOrResult: requestParams, // Or a sanitized version
+                };
+                debugWebServerInstance.addMcpTrace(traceEntry);
+            }
+
             handlerLogger.info(
                 { method: rpcMessage?.method, id: rpcMessage?.id, params: requestParams },
                 "[GATEWAY SERVER] 'agentify/orchestrateTask' handler started.",

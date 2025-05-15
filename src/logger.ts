@@ -7,14 +7,24 @@ let loggerInstance: pino.Logger<PinoLogLevel> | undefined;
 // pino v7+ has pino.LevelWithSilent
 export type PinoLogLevel = pino.LevelWithSilent;
 
+// pino.multistream can take an array of pino.StreamEntry or just WritableStream instances.
+// For clarity, we'll use a more generic stream definition that pino.multistream can handle.
+type LoggerStream = NodeJS.WritableStream | pino.DestinationStream | pino.StreamEntry<PinoLogLevel>;
+
 export function initializeLogger(
     options?: Pick<GatewayOptions, 'logLevel'>,
     testDestination?: pino.DestinationStream, // Optional destination for testing
+    debugLogStream?: pino.DestinationStream,  // Stream for debug web server
 ): pino.Logger<PinoLogLevel> {
-    const levelToUse = options?.logLevel || 'info';
+    const levelToUse: PinoLogLevel = options?.logLevel || 'info';
+
+    const pinoSinks: LoggerStream[] = [];
+
+    // Determine if pino-pretty should be used for console output
+    const usePinoPrettyForConsole = process.env.NODE_ENV !== 'production' && !debugLogStream;
 
     const pinoOptions: pino.LoggerOptions<PinoLogLevel> = {
-        level: levelToUse,
+        level: levelToUse === 'silent' ? 'info' : levelToUse, // pino instance level; 'silent' isn't a stream level
         serializers: {
             err: pino.stdSerializers.err, // Standard error serializer
             req: pino.stdSerializers.req, // Standard request serializer
@@ -23,9 +33,7 @@ export function initializeLogger(
         },
     };
 
-    let destinationStream: pino.DestinationStream = testDestination || pino.destination(process.stderr.fd); // Default to stderr
-
-    if (process.env.NODE_ENV !== 'production') {
+    if (usePinoPrettyForConsole) {
         pinoOptions.transport = {
             target: 'pino-pretty',
             options: {
@@ -34,17 +42,64 @@ export function initializeLogger(
                 ignore: 'pid,hostname', // Optional: remove pid and hostname from pretty print
             },
         };
+        // pino-pretty handles its own output, typically to process.stdout.
+        // If testDestination is also provided, it implies we might want non-pretty logs there.
+        if (testDestination) {
+             // Add testDestination for raw logs if testing alongside pretty-printing to console.
+            pinoSinks.push({ stream: testDestination, level: levelToUse === 'silent' ? undefined : levelToUse as pino.Level });
+        }
     } else {
-        // For production, no transport means JSON output. It will go to destinationStream (stderr).
+        // Not using pino-pretty for console: either production, or debugLogStream is active (forcing JSON for it).
+        // Add main output stream (stderr or testDestination) for raw JSON logs.
+        const mainOutputStream: pino.DestinationStream = testDestination || pino.destination(process.stderr.fd);
+        pinoSinks.push({ stream: mainOutputStream, level: levelToUse === 'silent' ? undefined : levelToUse as pino.Level });
     }
 
-    // Use testDestination if provided, otherwise pino defaults to process.stdout
-    loggerInstance = pino(pinoOptions, destinationStream);
+    if (debugLogStream) {
+        // Add the debugLogStream to receive all logs from 'trace' upwards that the main logger instance allows.
+        // The main logger's level (pinoOptions.level) acts as the primary filter.
+        pinoSinks.push({ stream: debugLogStream, level: 'trace' });
+    }
 
-    // Avoid logging during test runs if a testDestination is used, as it might interfere with spy assertions
-    // Or, log to the testDestination itself which is fine.
+    if (usePinoPrettyForConsole) {
+        // When pino-pretty transport is used, it dictates the main formatted output.
+        // If pinoSinks also has entries (e.g. testDestination for raw logs), 
+        // we need to create a base logger for those raw streams and then wrap with pretty.
+        // This is complex. For PoC: if usePinoPrettyForConsole, it's the dominant logger.
+        // To add other raw streams, pino-pretty should ideally be a stream itself in a multistream setup.
+        // Current pino behavior with transport means pino() doesn't use the second stream argument in the same way.
+        
+        // If only pino-pretty is needed (no other sinks like testDestination when pretty is on)
+        if (pinoSinks.length === 0) {
+            loggerInstance = pino(pinoOptions);
+        } else {
+            // This case is tricky: pino-pretty transport + other raw streams.
+            // For now, let pino-pretty take over console, and other streams are separate.
+            // This might mean testDestination doesn't get logs if pino-pretty is on. Or it might.
+            // Safest is to ensure if testDestination is used, pino-pretty is off for that test run if raw logs are needed there.
+            // To simplify: if usePinoPrettyForConsole, it is the ONLY output unless debugLogStream forces JSON.
+            // The pinoSinks for testDestination in this branch (usePinoPrettyForConsole) is problematic.
+            // Let's assume testDestination implies NO pino-pretty for that test run if raw logs are desired there.
+            loggerInstance = pino(pinoOptions); // pino-pretty will handle console
+            if (testDestination && pinoSinks.find(s => (s as any).stream === testDestination)) {
+                 loggerInstance.warn('testDestination provided with pino-pretty. Raw logs to testDestination might be inconsistent.');
+            }
+        }
+    } else if (pinoSinks.length > 0) {
+        // No pino-pretty for console, use multistream for all defined sinks (e.g., stderr, debugLogStream, testDestination)
+        loggerInstance = pino(pinoOptions, pino.multistream(pinoSinks as pino.StreamEntry<pino.Level>[]));
+    } else {
+        // Should only happen if no streams configured and not using pino-pretty (e.g. silent level, no debug, no test)
+        // Fallback to pino defaults (JSON to stdout)
+        loggerInstance = pino(pinoOptions);
+    }
+    
+    if (debugLogStream && process.env.NODE_ENV !== 'production' && !usePinoPrettyForConsole) {
+        loggerInstance.warn('pino-pretty transport for console was disabled because debugLogStream is active, ensuring JSON logs for the debug UI stream.');
+    }
+
     loggerInstance.info(
-        `Logger initialized with level: ${levelToUse}. Outputting to ${testDestination ? 'test destination' : 'stderr'}. NODE_ENV=${process.env.NODE_ENV}`,
+        `Logger initialized. Effective Level: ${loggerInstance.level}. Console Pretty: ${usePinoPrettyForConsole}. DebugStream Active: ${!!debugLogStream}. NODE_ENV=${process.env.NODE_ENV}`,
     );
     return loggerInstance;
 }
@@ -67,11 +122,11 @@ export function getLogger(): pino.Logger<PinoLogLevel> {
  * @param message - Optional override message. If context is a string, it's used as the message.
  */
 export function logError(context: string | Record<string, unknown>, error: Error, message?: string): void {
-    const logger = getLogger();
+    const localLogger = getLogger();
     if (typeof context === 'string') {
-        logger.error({ err: error }, message || context);
+        localLogger.error({ err: error }, message || context);
     } else {
-        logger.error({ ...context, err: error }, message || 'An error occurred');
+        localLogger.error({ ...context, err: error }, message || 'An error occurred');
     }
 }
 
@@ -81,11 +136,11 @@ export function logError(context: string | Record<string, unknown>, error: Error
  * @param message - Optional override message if context is an object.
  */
 export function logWarning(context: string | Record<string, unknown>, message?: string): void {
-    const logger = getLogger();
+    const localLogger = getLogger();
     if (typeof context === 'string') {
-        logger.warn(context);
+        localLogger.warn(context);
     } else {
-        logger.warn(context, message || 'Warning event');
+        localLogger.warn(context, message || 'Warning event');
     }
 }
 
@@ -95,11 +150,11 @@ export function logWarning(context: string | Record<string, unknown>, message?: 
  * @param message - Optional override message if context is an object.
  */
 export function logInfo(context: string | Record<string, unknown>, message?: string): void {
-    const logger = getLogger();
+    const localLogger = getLogger();
     if (typeof context === 'string') {
-        logger.info(context);
+        localLogger.info(context);
     } else {
-        logger.info(context, message || 'Informational event');
+        localLogger.info(context, message || 'Informational event');
     }
 }
 
@@ -109,11 +164,11 @@ export function logInfo(context: string | Record<string, unknown>, message?: str
  * @param message - Optional override message if context is an object.
  */
 export function logDebug(context: string | Record<string, unknown>, message?: string): void {
-    const logger = getLogger();
+    const localLogger = getLogger();
     if (typeof context === 'string') {
-        logger.debug(context);
+        localLogger.debug(context);
     } else {
-        logger.debug(context, message || 'Debug event');
+        localLogger.debug(context, message || 'Debug event');
     }
 }
 
