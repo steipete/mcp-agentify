@@ -40,6 +40,7 @@ export function initializeLogger(
                 colorize: true,
                 translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l', // Example: 2023-10-27 14:30:45.123
                 ignore: 'pid,hostname', // Optional: remove pid and hostname from pretty print
+                destination: 2, // Send pretty output to stderr (fd 2) to avoid interfering with JSON-RPC over stdout
             },
         };
         // pino-pretty handles its own output, typically to process.stdout.
