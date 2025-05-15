@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Agentify - Debug UI</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>MCP Agentify - Debug UI</h1>
+
+        <section id="status-section">
+            <h2>Gateway Status</h2>
+            <div id="status-content">
+                <p>Loading status...</p>
+            </div>
+        </section>
+
+        <section id="config-section">
+            <h2>Gateway Configuration</h2>
+            <pre id="config-content">Loading configuration...</pre>
+        </section>
+
+        <section id="logs-section">
+            <h2>Real-time Logs</h2>
+            <div id="logs-filter">
+                <label for="log-level-filter">Min Level:</label>
+                <select id="log-level-filter">
+                    <option value="all">All</option>
+                    <option value="TRACE">Trace</option>
+                    <option value="DEBUG">Debug</option>
+                    <option value="INFO" selected>Info</option>
+                    <option value="WARN">Warn</option>
+                    <option value="ERROR">Error</option>
+                    <option value="FATAL">Fatal</option>
+                </select>
+                <label for="log-auto-scroll">Auto-scroll:</label>
+                <input type="checkbox" id="log-auto-scroll" checked>
+            </div>
+            <div id="logs-content" class="log-container"></div>
+        </section>
+
+        <section id="traces-section">
+            <h2>MCP Traces</h2>
+            <div id="trace-filter">
+                 <label for="trace-auto-scroll">Auto-scroll:</label>
+                <input type="checkbox" id="trace-auto-scroll" checked>
+            </div>
+            <div id="traces-content" class="log-container"></div>
+        </section>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html> 
