@@ -3,6 +3,9 @@
 # Redirect informational echo to stderr so it doesn't interfere with MCP communication on stdout
 echo "Starting mcp-agentify in development mode (via ts-node and npx nodemon)..." >&2
 
+# Ensure a default DEBUG_PORT so the debug web server starts when running locally.
+export DEBUG_PORT=${DEBUG_PORT:-3030}
+
 # Ensure OPENAI_API_KEY is set in .env or your shell environment
 # NODE_ENV is set for the executed command.
 # Use --quiet to minimize nodemon's own output on stdout.
