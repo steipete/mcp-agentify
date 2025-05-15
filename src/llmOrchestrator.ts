@@ -144,7 +144,7 @@ export class LLMOrchestratorService {
 
         // Corrected type path for ChatCompletionCreateParams
         const requestPayload: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
-            model: 'gpt-4-turbo-preview', // As per spec.md
+            model: 'gpt-4.1',
             messages: messages,
             tools: this.availableToolsForLLM,
             tool_choice: 'auto' as const, // Ensure tool_choice is specifically "auto" or an object
