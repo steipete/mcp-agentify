@@ -39,7 +39,7 @@ The initial version (PoC) of `mcp-agentify` will demonstrate its core capabiliti
     *   **FR1.1: Act as MCP Server:** `mcp-agentify` MUST implement an MCP server communicating via `stdio`.
     *   **FR1.2: Initialization:**
         *   MUST handle the standard MCP `initialize` request.
-        *   MUST accept `initializationOptions` containing `GatewayOptions` (defined in technical spec: `OPENAI_API_KEY`, `backends` array, `logLevel`, `DEBUG_PORT`).
+        *   MUST accept `initializationOptions` containing `GatewayOptions` (defined in technical spec: `OPENAI_API_KEY`, `backends` array, `logLevel`, `FRONTEND_PORT`).
         *   MUST validate `GatewayOptions` using a Zod schema.
         *   MUST use the provided configuration to initialize backend MCP server connections and the LLM orchestration service.
         *   MUST respond with standard `InitializeResult` including its server info (name: "mcp-agentify", version).
@@ -90,7 +90,7 @@ The initial version (PoC) of `mcp-agentify` will demonstrate its core capabiliti
 **FR6: Development and Debugging Support**
     *   **FR6.1: Local Development Script:** A `scripts/dev.sh` script MUST be provided to easily start `mcp-agentify` locally using `ts-node` and `nodemon` for development.
     *   **FR6.2: Optional Debug Web Interface:**
-        *   If configured (via `DEBUG_PORT` in `GatewayOptions`), `mcp-agentify` SHOULD start a local HTTP server.
+        *   If configured (via `FRONTEND_PORT` in `GatewayOptions`), `mcp-agentify` SHOULD start a local HTTP server. If `FRONTEND_PORT` is set to the string value `"disabled"`, the frontend UI server will not start.
         *   This server SHOULD provide endpoints for:
             *   Status of `mcp-agentify` and connected backends.
             *   Viewing (sanitized) current configuration.

@@ -24,6 +24,10 @@ node_modules/
 # OS specific
 .DS_Store
 
+# Build output & Caches
+.parcel-cache/
+dist/
+
 # Task files
 tasks.json
 tasks/ 

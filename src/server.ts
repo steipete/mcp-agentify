@@ -16,7 +16,7 @@ import type { Logger as PinoLoggerType } from 'pino';
 import { initializeLogger, getLogger, type PinoLogLevel } from './logger';
 import { BackendManager } from './backendManager';
 import { LLMOrchestratorService } from './llmOrchestrator';
-import { DebugWebServer } from './debugWebServer';
+import { FrontendServer } from './frontendServer';
 import type {
     GatewayOptions,
     AgentifyOrchestrateTaskParams,
@@ -36,11 +36,11 @@ let pinoLogger: PinoLoggerType<PinoLogLevel>;
 let internalGatewayOptions: GatewayOptions; // Renamed for clarity, this is the true internal config
 let backendManager: BackendManager | undefined;
 let llmOrchestrator: LLMOrchestratorService | undefined;
-let debugWebServerInstance: DebugWebServer | undefined;
+let frontendServerInstance: FrontendServer | undefined;
 let mcpConnection: MessageConnection | undefined; // Store the connection
 
 // Expose a function to send requests on the main MCP connection
-export type McpRequester = (method: string, params: any) => Promise<any>;
+export type McpRequester = (method: string, params: unknown) => Promise<unknown>;
 let mcpRequester: McpRequester | undefined;
 
 const tempConsoleLogger = {
@@ -64,35 +64,36 @@ function getPackageVersion(): string {
 export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOptions>) {
     // --- START EARLY AND FINAL CORE INITIALIZATION ---
     const envLogLevel: PinoLogLevel = initialCliOptions?.logLevel || 'info';
-    const envDebugPort: number | null = initialCliOptions?.DEBUG_PORT || 3030; // Default to 3030
+    const envFrontendPort: number | null = initialCliOptions?.FRONTEND_PORT || 3030; // Default to 3030
     const envOpenApiKey: string | undefined = initialCliOptions?.OPENAI_API_KEY; // From env
 
     let tempPinoLogger: PinoLoggerType<PinoLogLevel> = initializeLogger({ logLevel: envLogLevel });
 
-    if (envDebugPort && envDebugPort > 0) {
+    // Check if FRONTEND_PORT is explicitly set to null (disabled) or is a valid port number
+    if (envFrontendPort === null) {
+        tempPinoLogger.info('[GATEWAY SERVER PRE-INIT] FrontendServer is disabled as FRONTEND_PORT was set to "disabled".');
+    } else if (envFrontendPort && envFrontendPort > 0) {
         tempPinoLogger.info(
-            `[GATEWAY SERVER PRE-INIT] DEBUG_PORT ${envDebugPort} active (from env or default). Attempting to start DebugWebServer.`,
+            `[GATEWAY SERVER PRE-INIT] FRONTEND_PORT ${envFrontendPort} active (from env or default). Attempting to start FrontendServer.`,
         );
         try {
-            debugWebServerInstance = new DebugWebServer(
-                envDebugPort,
+            frontendServerInstance = new FrontendServer(
+                envFrontendPort,
                 tempPinoLogger,
                 undefined,
-                { DEBUG_PORT: envDebugPort, logLevel: envLogLevel } as GatewayOptions, // Partial for early start
+                { FRONTEND_PORT: envFrontendPort, logLevel: envLogLevel } as GatewayOptions, // Partial for early start
             );
-            debugWebServerInstance.start();
-            const debugStreamForPino = debugWebServerInstance?.getLogStream();
-            if (debugStreamForPino) {
-                tempPinoLogger = initializeLogger(
-                    { logLevel: envLogLevel }, undefined, debugStreamForPino
-                );
-                debugWebServerInstance.updateLogger(tempPinoLogger);
+            frontendServerInstance.start();
+            const logStreamForPino = frontendServerInstance?.getLogStream();
+            if (logStreamForPino) {
+                tempPinoLogger = initializeLogger({ logLevel: envLogLevel }, undefined, logStreamForPino);
+                frontendServerInstance.updateLogger(tempPinoLogger);
                 tempPinoLogger.info(
-                    '[GATEWAY SERVER PRE-INIT] DebugWebServer started and logger updated with its stream.',
+                    '[GATEWAY SERVER PRE-INIT] FrontendServer started and logger updated with its stream.',
                 );
             }
         } catch (err) {
-            tempPinoLogger.error({ err }, '[GATEWAY SERVER PRE-INIT] Failed to start DebugWebServer early.');
+            tempPinoLogger.error({ err }, '[GATEWAY SERVER PRE-INIT] Failed to start FrontendServer early.');
         }
     }
     pinoLogger = tempPinoLogger;
@@ -101,7 +102,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
     // `backends` will be added during 'initialize'
     internalGatewayOptions = {
         logLevel: envLogLevel,
-        DEBUG_PORT: envDebugPort,
+        FRONTEND_PORT: envFrontendPort,
         OPENAI_API_KEY: envOpenApiKey,
         backends: [], // Initialize with empty backends; will be populated from client
     };
@@ -118,7 +119,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
         {
             configFromEnv: {
                 logLevel: internalGatewayOptions.logLevel,
-                DEBUG_PORT: internalGatewayOptions.DEBUG_PORT,
+                FRONTEND_PORT: internalGatewayOptions.FRONTEND_PORT,
                 OPENAI_API_KEY: internalGatewayOptions.OPENAI_API_KEY ? '***' : undefined,
             },
         },
@@ -127,15 +128,11 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
 
     // --- END EARLY AND FINAL CORE INITIALIZATION ---
 
-    const connection: MessageConnection = createMessageConnection(
-        process.stdin,
-        process.stdout,
-        tempConsoleLogger as any,
-    );
+    const connection: MessageConnection = createMessageConnection(process.stdin, process.stdout, tempConsoleLogger);
     mcpConnection = connection; // Assign to module-scoped variable
 
     // Define the requester function
-    mcpRequester = async (method: string, params: any) => {
+    mcpRequester = async (method: string, params: unknown) => {
         if (!mcpConnection) {
             pinoLogger.error('MCP connection not available for mcpRequester.');
             throw new Error('MCP connection not available');
@@ -144,32 +141,41 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
         return mcpConnection.sendRequest(method, params);
     };
 
-    // Pass the mcpRequester to DebugWebServer if it exists
-    if (debugWebServerInstance && typeof debugWebServerInstance.setMcpRequester === 'function') {
-        debugWebServerInstance.setMcpRequester(mcpRequester);
+    // Pass the mcpRequester to FrontendServer if it exists
+    if (frontendServerInstance && typeof frontendServerInstance.setMcpRequester === 'function') {
+        frontendServerInstance.setMcpRequester(mcpRequester);
     }
 
     // Dynamically register agent methods based on AGENTS from environment
     if (internalGatewayOptions.gptAgents && internalGatewayOptions.gptAgents.length > 0) {
-        pinoLogger.info({ agents: internalGatewayOptions.gptAgents }, '[GATEWAY SERVER] Registering dynamic agent methods from AGENTS env var...');
-        for (const fullAgentString of internalGatewayOptions.gptAgents) { // e.g., "OpenAI/gpt-4.1"
+        pinoLogger.info(
+            { agents: internalGatewayOptions.gptAgents },
+            '[GATEWAY SERVER] Registering dynamic agent methods from AGENTS env var...',
+        );
+        for (const fullAgentString of internalGatewayOptions.gptAgents) {
+            // e.g., "OpenAI/gpt-4.1"
             // Sanitize the full string for the method name: replace non-alphanumeric (except /) with _
             // Then replace / with _ to ensure it's a single segment after agent_
             const sanitizedMethodPart = fullAgentString.replace(/[^a-zA-Z0-9_\/]/g, '_').replace(/\//g, '_');
             const methodName = `agentify/agent_${sanitizedMethodPart}`;
-            
+
             pinoLogger.info(`[GATEWAY SERVER] Registering method: ${methodName} for agent: ${fullAgentString}`);
 
             connection.onRequest(methodName, async (params: { query: string; context?: OrchestrationContext }) => {
-                pinoLogger.info({ method: methodName, agent: fullAgentString, params }, `Dynamic agent method ${methodName} called.`);
+                pinoLogger.info(
+                    { method: methodName, agent: fullAgentString, params },
+                    `Dynamic agent method ${methodName} called.`,
+                );
                 if (!llmOrchestrator) {
                     pinoLogger.error({ method: methodName }, 'LLMOrchestrator not available for dynamic agent call.');
                     throw new ResponseError(ErrorCodes.InternalError, 'LLMOrchestrator not initialized');
                 }
                 // TODO: Future - llmOrchestrator.invokeAgent(fullAgentString, params.query, params.context);
                 return {
-                    message: `Agent '${fullAgentString}' received query: "${params.query}". Context: ${JSON.stringify(params.context || {})}`,
-                    note: "This is a placeholder response. Full LLM interaction for dynamic agents is not yet implemented."
+                    message: `Agent '${fullAgentString}' received query: "${params.query}". Context: ${JSON.stringify(
+                        params.context || {},
+                    )}`,
+                    note: 'This is a placeholder response. Full LLM interaction for dynamic agents is not yet implemented.',
                 };
             });
         }
@@ -195,10 +201,10 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
 
     connection.onNotification('shutdown', async () => {
         getLogger().info('Received shutdown notification from client. Initiating graceful shutdown...');
-        if (debugWebServerInstance) {
-            await debugWebServerInstance
+        if (frontendServerInstance) {
+            await frontendServerInstance
                 .stop()
-                .catch((err) => getLogger().error({ err }, 'Error stopping debug web server during shutdown'));
+                .catch((err) => getLogger().error({ err }, 'Error stopping frontend server during shutdown'));
         }
         if (backendManager) {
             try {
@@ -212,10 +218,10 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
 
     connection.onNotification('exit', () => {
         getLogger().info('Received exit notification from client. Exiting process now.');
-        if (debugWebServerInstance) {
-            debugWebServerInstance
+        if (frontendServerInstance) {
+            frontendServerInstance
                 .stop()
-                .catch((err) => getLogger().error({ err }, 'Error stopping debug web server during exit'));
+                .catch((err) => getLogger().error({ err }, 'Error stopping frontend server during exit'));
         }
         if (backendManager) {
             backendManager.shutdownAllBackends().catch((err) => {
@@ -248,8 +254,8 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     });
                 }
                 const clientSentOptions: GatewayClientInitOptions = clientOptionsValidation.data;
-                if (debugWebServerInstance) {
-                    debugWebServerInstance.setClientSentInitOptions(clientSentOptions);
+                if (frontendServerInstance) {
+                    frontendServerInstance.setClientSentInitOptions(clientSentOptions);
                 }
 
                 // Populate `backends` in the internalGatewayOptions
@@ -265,14 +271,14 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     });
                 }
 
-                // Debug Web Server should already be running if DEBUG_PORT was set via ENV or defaulted.
-                // If client *also* sent a DEBUG_PORT in its (now mostly ignored for this) options, log it but take no action if different.
+                // Debug Web Server should already be running if FRONTEND_PORT was set via ENV or defaulted.
+                // If client *also* sent a FRONTEND_PORT in its (now mostly ignored for this) options, log it but take no action if different.
                 if (
-                    params.initializationOptions?.DEBUG_PORT &&
-                    params.initializationOptions.DEBUG_PORT !== internalGatewayOptions.DEBUG_PORT
+                    params.initializationOptions?.FRONTEND_PORT &&
+                    params.initializationOptions.FRONTEND_PORT !== internalGatewayOptions.FRONTEND_PORT
                 ) {
                     pinoLogger.warn(
-                        `[GATEWAY SERVER] Client sent DEBUG_PORT ${params.initializationOptions.DEBUG_PORT}, but gateway is using ${internalGatewayOptions.DEBUG_PORT} (from env/default).`,
+                        `[GATEWAY SERVER] Client sent FRONTEND_PORT ${params.initializationOptions.FRONTEND_PORT}, but gateway is using ${internalGatewayOptions.FRONTEND_PORT} (from env/default).`,
                     );
                 }
                 // Same for logLevel
@@ -289,9 +295,9 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     { finalGatewayConfig: { ...internalGatewayOptions, OPENAI_API_KEY: '***' } },
                     '[GATEWAY SERVER] Final gateway configuration assembled.',
                 );
-                if (debugWebServerInstance) {
+                if (frontendServerInstance) {
                     // Pass the final, fully assembled internal config
-                    debugWebServerInstance.setFinalEffectiveConfig(internalGatewayOptions); 
+                    frontendServerInstance.setFinalEffectiveConfig(internalGatewayOptions);
                 }
 
                 pinoLogger.info('[GATEWAY SERVER] Initializing BackendManager...');
@@ -300,12 +306,14 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     await backendManager.initializeAllBackends(internalGatewayOptions.backends);
                     pinoLogger.info('[GATEWAY SERVER] BackendManager initialized all backends successfully.');
                     backendManager.on('mcpTrace', (traceEntry: McpTraceEntry) => {
-                        if (debugWebServerInstance) {
-                            debugWebServerInstance.addMcpTrace(traceEntry);
+                        if (frontendServerInstance) {
+                            frontendServerInstance.addMcpTrace(traceEntry);
                         }
                     });
                 } catch (err: unknown) {
-                    const backendInitErrorMsg = `Critical error during BackendManager initialization: ${(err as Error).message}`;
+                    const backendInitErrorMsg = `Critical error during BackendManager initialization: ${
+                        (err as Error).message
+                    }`;
                     pinoLogger.error({ err }, `[GATEWAY SERVER] ${backendInitErrorMsg}`);
                     throw new ResponseError(-32006, backendInitErrorMsg, { originalError: (err as Error).message });
                 }
@@ -323,21 +331,25 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     throw new ResponseError(-32005, llmInitErrorMsg, { originalError: (err as Error).message });
                 }
 
-                if (debugWebServerInstance && backendManager) {
-                    // Update DebugWebServer with BackendManager if it has a method to accept it for /api/status
+                if (frontendServerInstance && backendManager) {
+                    // Update FrontendServer with BackendManager if it has a method to accept it for /api/status
                     // For now, constructor takes it as optional. If it was started early, it won't have it.
-                    // This is a good place to provide it if a method exists, e.g., debugWebServerInstance.setBackendManager(backendManager);
+                    // This is a good place to provide it if a method exists, e.g., frontendServerInstance.setBackendManager(backendManager);
                     pinoLogger.info(
-                        '[GATEWAY SERVER] DebugWebServer (if running) can now associate with BackendManager.',
+                        '[GATEWAY SERVER] FrontendServer (if running) can now associate with BackendManager.',
                     );
                 }
 
-                // After all initializations, if debugWebServerInstance exists and needs the requester again (e.g. if re-created)
-                if (debugWebServerInstance && mcpRequester && typeof debugWebServerInstance.setMcpRequester === 'function') {
-                     // This might be redundant if already set, but ensures it has it.
-                    // debugWebServerInstance.setMcpRequester(mcpRequester);
+                // After all initializations, if frontendServerInstance exists and needs the requester again (e.g. if re-created)
+                if (
+                    frontendServerInstance &&
+                    mcpRequester &&
+                    typeof frontendServerInstance.setMcpRequester === 'function'
+                ) {
+                    // This might be redundant if already set, but ensures it has it.
+                    // frontendServerInstance.setMcpRequester(mcpRequester);
                 }
-                
+
                 pinoLogger.info(
                     '[GATEWAY SERVER] SUCCESSFULLY COMPLETED ALL INITIALIZATION LOGIC. ABOUT TO RETURN InitializeResult.',
                 );
@@ -370,7 +382,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
             rpcMessage?: RequestMessage,
         ) => {
             const handlerLogger = getLogger();
-            if (debugWebServerInstance && rpcMessage) {
+            if (frontendServerInstance && rpcMessage) {
                 const traceEntry: McpTraceEntry = {
                     timestamp: Date.now(),
                     direction: 'INCOMING_TO_GATEWAY',
@@ -379,7 +391,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     method: rpcMessage.method,
                     paramsOrResult: requestParams,
                 };
-                debugWebServerInstance.addMcpTrace(traceEntry);
+                frontendServerInstance.addMcpTrace(traceEntry);
             }
 
             handlerLogger.info(
@@ -426,11 +438,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                 handlerLogger.info({ plan }, 'LLM orchestrator returned a plan.');
                 handlerLogger.debug(`Executing plan on backend: ${plan.backendId}, method: ${plan.mcpMethod}`);
                 try {
-                    const result = await backendManager.executeOnBackend(
-                        plan.backendId,
-                        plan.mcpMethod,
-                        plan.mcpParams,
-                    );
+                    const result = await backendManager.executeOnBackend(plan.backendId, plan.mcpMethod, plan.mcpParams);
                     handlerLogger.info(
                         { backendId: plan.backendId, method: plan.mcpMethod, result },
                         'Successfully executed plan on backend.',
@@ -472,9 +480,9 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
     });
 
     connection.listen();
-    pinoLogger.info(
-        "[GATEWAY SERVER] MCP Agentify server fully started and listening on stdio."
-    );
+    pinoLogger.info('[GATEWAY SERVER] MCP Agentify server fully started and listening on stdio.');
     // Keep the server alive indefinitely until an exit event
-    return new Promise(() => { /* This promise never resolves, keeping the process alive */ });
+    return new Promise(() => {
+        /* This promise never resolves, keeping the process alive */
+    });
 }

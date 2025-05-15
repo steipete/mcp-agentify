@@ -4,7 +4,7 @@ import 'dotenv/config'; // Load .env file at the very top
 
 // Earliest possible point to check raw environment variable
 console.error(`[CLI PRE-INIT] Raw process.env.LOG_LEVEL: ${process.env.LOG_LEVEL}`);
-console.error(`[CLI PRE-INIT] Raw process.env.DEBUG_PORT: ${process.env.DEBUG_PORT}`);
+console.error(`[CLI PRE-INIT] Raw process.env.FRONTEND_PORT: ${process.env.FRONTEND_PORT}`);
 
 import { startAgentifyServer } from './server';
 import { initializeLogger, getLogger } from './logger';
@@ -23,10 +23,18 @@ async function main() {
     if (process.env.LOG_LEVEL) {
         initialCliOptions.logLevel = process.env.LOG_LEVEL as PinoLogLevel;
     }
-    if (process.env.DEBUG_PORT) {
-        const port = Number.parseInt(process.env.DEBUG_PORT, 10);
-        if (!Number.isNaN(port) && port > 0) {
-            initialCliOptions.DEBUG_PORT = port;
+    if (process.env.FRONTEND_PORT) {
+        if (process.env.FRONTEND_PORT.toLowerCase() === 'disabled') {
+            initialCliOptions.FRONTEND_PORT = null; // Signal to disable
+            cliLogger.info('[CLI PRE-INIT] FRONTEND_PORT is set to "disabled". FrontendServer will not be started.');
+        } else {
+            const port = Number.parseInt(process.env.FRONTEND_PORT, 10);
+            if (!Number.isNaN(port) && port > 0) {
+                initialCliOptions.FRONTEND_PORT = port;
+            } else {
+                cliLogger.warn(`[CLI PRE-INIT] Invalid FRONTEND_PORT value: ${process.env.FRONTEND_PORT}. Using default or client-provided if any.`);
+                // Let server.ts handle default if parsing fails and it wasn't "disabled"
+            }
         }
     }
     // OPENAI_API_KEY from .env will be read by GatewayOptionsSchema in onInitialize if not provided by client.

@@ -79,12 +79,13 @@ describe('GatewayOptionsSchema', () => {
         expect(result.success).toBe(true);
     });
 
-    it('should validate with all optional fields (logLevel, DEBUG_PORT)', () => {
-        const result = GatewayOptionsSchema.safeParse({
-            ...baseValidOptionsWithKey,
+    it('should validate with all optional fields (logLevel, FRONTEND_PORT)', () => {
+        const options: GatewayOptions = {
+            backends: [{ id: 'test-backend', type: 'stdio', command: 'echo' }],
             logLevel: 'debug',
-            DEBUG_PORT: 3001,
-        });
+            FRONTEND_PORT: 3001,
+        };
+        const result = GatewayOptionsSchema.safeParse(options);
         expect(result.success, JSON.stringify(result.success ? {} : result.error.format())).toBe(true);
     });
 

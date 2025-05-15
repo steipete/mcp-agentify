@@ -25,26 +25,39 @@ export const OrchestrationContextSchema = z
 export type OrchestrationContext = z.infer<typeof OrchestrationContextSchema>;
 
 // This schema now primarily validates the structure of `backends` when parsing client-provided initializationOptions.
-// Core gateway settings (logLevel, OPENAI_API_KEY, DEBUG_PORT) are now strictly environment-driven and set pre-MCP handshake.
+// Core gateway settings (logLevel, OPENAI_API_KEY, FRONTEND_PORT) are now strictly environment-driven and set pre-MCP handshake.
 export const GatewayClientInitOptionsSchema = z.object({
     backends: z.array(BackendConfigSchema).min(1, 'At least one backend configuration is required.'),
     // The following are optional if a client *really* wants to send them, but mcp-agentify will ignore them
     // in favor of environment variables for its own configuration.
     logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional(),
     OPENAI_API_KEY: z.string().min(1).optional(),
-    DEBUG_PORT: z.number().int().positive().optional().nullable(),
+    ANTHROPIC_API_KEY: z.string().optional(),
+    COHERE_API_KEY: z.string().optional(),
+    FRONTEND_PORT: z.number().int().positive().optional().nullable(),
 });
 export type GatewayClientInitOptions = z.infer<typeof GatewayClientInitOptionsSchema>;
 
 // GatewayOptions now represents the final, merged, and internally used configuration.
 // It will be populated from environment variables first, then potentially from client for `backends`.
-export type GatewayOptions = {
-    logLevel: PinoLogLevel; // Now strictly from env, with internal default
-    OPENAI_API_KEY?: string; // From env, required for operation
-    backends: BackendConfig[]; // From client init options
-    DEBUG_PORT?: number | null; // From env, with internal default
-    gptAgents?: string[]; // For dynamically exposed agent methods
-};
+export const GatewayOptionsSchema = z.object({
+    logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional().default('info'),
+    OPENAI_API_KEY: z.string().optional(), // Can be from env or client, env takes precedence.
+    ANTHROPIC_API_KEY: z.string().optional(),
+    COHERE_API_KEY: z.string().optional(),
+    // Add other API keys as needed following the same pattern
+
+    // FRONTEND_PORT is now FRONTEND_PORT. It determines if and on what port the debug web server runs.
+    // This is primarily controlled by the mcp-agentify server's own environment.
+    // If not in env, client can suggest it, but env is king.
+    // If neither, it might not start, or start on a default if the server logic implies one (e.g., 3030).
+    FRONTEND_PORT: z.number().int().positive().optional().nullable(),
+
+    // `backends` configuration is primarily client-driven via initializationOptions.
+    backends: z.array(BackendConfigSchema).min(1, 'At least one backend configuration is required.'),
+    gptAgents: z.array(z.string()).optional(), // For dynamically exposed agent methods
+});
+export type GatewayOptions = z.infer<typeof GatewayOptionsSchema>;
 
 export const AgentifyOrchestrateTaskParamsSchema = z.object({
     query: z.string().min(1),

@@ -14,8 +14,10 @@ cd "$SCRIPT_DIR/.." # Go up one level from scripts/ to project root
 # Redirect informational echo to stderr
 echo "Starting mcp-agentify with npx tsx (IDE mode, CWD: $(pwd))..." >&2
 
-# Ensure a default DEBUG_PORT
-export DEBUG_PORT=${DEBUG_PORT:-3030}
+# Ensure a default FRONTEND_PORT
+export FRONTEND_PORT=${FRONTEND_PORT:-3030}
 # OPENAI_API_KEY and LOG_LEVEL should be set by the IDE's env configuration for the server process.
+
+# If the VSCODE_INSPECTOR_OPTIONS environment variable is set (e.g., by VS Code's JavaScript debugger),
 
 NODE_ENV=development npx tsx ./src/cli.ts 

@@ -34,7 +34,7 @@ interface GatewayOptions {
   OPENAI_API_KEY: string; // OpenAI API key (can also be set via .env)
   backends: BackendConfig[]; // Array of backend MCP server configurations
   logLevel?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent'; // Optional: desired log level for the gateway
-  DEBUG_PORT?: number | null; // Optional: port for the debug web interface
+  FRONTEND_PORT?: number | string | null; // Optional: port for the frontend web interface. Set to "disabled" to prevent the frontend UI server from starting.
 }
 
 // Defined in src/interfaces.ts (derived from src/schemas.ts)

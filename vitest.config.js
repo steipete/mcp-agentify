@@ -16,7 +16,7 @@ exports.default = (0, config_1.defineConfig)({
             exclude: [
                 'src/cli.ts', // CLI entry point might be harder to unit test directly
                 'src/server.ts', // Server setup might be more integration test
-                'src/debugWebServer.ts', // Optional debug component
+                'src/frontendServer.ts', // Optional frontend component
                 'src/**/*.d.ts',
                 'src/interfaces.ts' // Interfaces don't have runnable code
             ],

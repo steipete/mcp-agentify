@@ -4,7 +4,6 @@
         "module": "CommonJS",
         "moduleResolution": "node",
         "outDir": "./dist",
-        "rootDir": "./src",
         "strict": true,
         "esModuleInterop": true,
         "skipLibCheck": true,
@@ -15,6 +14,13 @@
         "jsx": "react-jsx",
         "jsxImportSource": "preact"
     },
-    "include": ["src/**/*", "src_debug_ui/**/*"],
-    "exclude": ["node_modules", "dist", "public_debug_ui"]
+    "include": [
+        "src/**/*",
+        "frontend/src/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist",
+        "frontend/public"
+    ]
 }

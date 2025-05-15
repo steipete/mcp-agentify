@@ -19,7 +19,7 @@ Develop `mcp-agentify`, a Node.js/TypeScript application acting as an AI-Powered
     f.  Proxy the LLM-determined MCP call to the chosen backend server.
     g.  Return the backend's response (or a summarized plain text error) to the client IDE.
     h.  Treat MCP calls as one-shot operations; no cross-call state management will be implemented in this PoC.
-    i.  Include an optional local debug web interface (Express.js + WebSockets) for observing logs, status, and MCP traces, configurable via a port in `initializationOptions`.
+    i.  Include an optional local frontend web interface (Express.js + WebSockets) for observing logs, status, and MCP traces, configurable via a port in `initializationOptions`. If FRONTEND_PORT is set to the string value "disabled", the frontend UI server will not start.
     j.  Be runnable locally for development via a `scripts/dev.sh` script and ultimately be packageable for `npx` distribution.
     k.  Utilize `pino` for structured logging, `zod` for schema validation, and `vitest` for testing.
 
@@ -45,7 +45,7 @@ mcp-agentify/
 │   ├── server.ts               # Core MCP Agentify server logic (class or functions)
 │   ├── backendManager.ts       # Manages lifecycle & connections to backend MCP servers
 │   ├── llmOrchestrator.ts      # Handles OpenAI API interaction, tool definitions, planning
-│   ├── debugWebServer.ts       # (Optional) Logic for the debug HTTP/WebSocket server
+│   ├── frontendServer.ts        # (Optional) Logic for the frontend HTTP/WebSocket server
 │   ├── logger.ts               # Configures and exports pino logger instance
 │   ├── mcpTracer.ts            # (Optional) Utility for tracing MCP messages
 │   ├── interfaces.ts           # Shared TypeScript interfaces (GatewayOptions, BackendConfig, Plan, etc.)
@@ -96,7 +96,7 @@ export const GatewayOptionsSchema = z.object({
     logLevel: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]).default('info').optional(),
     OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required."),
     backends: z.array(BackendConfigSchema).min(1, "At least one backend configuration is required."),
-    DEBUG_PORT: z.number().int().positive().optional().nullable(),
+    FRONTEND_PORT: z.number().int().positive().optional().nullable(),
 });
 export type GatewayOptions = z.infer<typeof GatewayOptionsSchema>;
 
@@ -270,7 +270,7 @@ export interface McpTraceEntry {
         *   Log `gatewayOptions` (sanitized).
         *   Initialize `backendManager = new BackendManager(logger.child({ component: 'BackendManager' }));` and call `await backendManager.initializeAllBackends(gatewayOptions.backends);`.
         *   Initialize `llmOrchestrator = new LLMOrchestratorService(gatewayOptions.OPENAI_API_KEY, gatewayOptions.backends, logger.child({ component: 'LLMOrchestrator' }));`.
-        *   (Optional) `if (gatewayOptions.DEBUG_PORT) { startDebugWebServer(gatewayOptions.DEBUG_PORT, logger, backendManager); }`
+        *   (Optional) `if (gatewayOptions.FRONTEND_PORT && gatewayOptions.FRONTEND_PORT !== "disabled") { startDebugWebServer(gatewayOptions.FRONTEND_PORT, logger, backendManager); }`
         *   Return `InitializeResult` (e.g., `{ capabilities: {}, serverInfo: { name: "mcp-agentify", version: "0.1.0" } }`).
     *   `connection.onRequest('agentify/orchestrateTask', async (requestParams: unknown, _token, rpcMessage: RequestMessage) => { ... })`:
         1.  Log incoming request with `logger.info` and (optionally) `traceMcpMessage`.
@@ -310,7 +310,8 @@ main().catch(error => {
 });
 ```
 
-**5.7. `debugWebServer.ts` (Optional)**
+**5.7. `frontendServer.ts` (Optional)**
+    *   Will not start if `gatewayOptions.FRONTEND_PORT` is set to the string value `"disabled"`.
     *   Implement using `express` and `ws`.
     *   Accept `pino.Logger` and `BackendManager` instances.
     *   Endpoints: `/api/status`, `/api/backends` (from `BackendManager.getBackendStates()`), `/api/config` (sanitized `gatewayOptions`), `/api/logs`, `/api/mcptrace`.
@@ -323,14 +324,14 @@ main().catch(error => {
     OPENAI_API_KEY=sk-YourActualOpenAIKey
     # BROWSERBASE_API_KEY=bb_api_... (if Browserbase takes key from env)
     # LOG_LEVEL=debug (optional, can also be set in initializationOptions)
-    # DEBUG_PORT=3001 (optional for debug UI)
+    # FRONTEND_PORT=3001 (optional for frontend UI, set to "disabled" to prevent UI server from starting)
     ```
 *   **`initializationOptions` Example (passed by Client IDE):**
     ```json
     {
       "logLevel": "debug",
       "OPENAI_API_KEY": "sk-PASSED_VIA_INIT_OPTIONS_IF_NOT_IN_ENV_OR_OVERRIDE",
-      "DEBUG_PORT": 3001,
+      "FRONTEND_PORT": 3001,
       "backends": [
         {
           "id": "filesystem",

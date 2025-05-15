@@ -13,11 +13,10 @@ interface StatusData {
     backends?: BackendStatus[];
 }
 
-interface ConfigData {
-    // Define based on expected structure of /api/config response
-    logLevel?: string;
-    DEBUG_PORT?: number;
-    // Add other fields as necessary, remember to sanitize API keys if displayed
+interface ConfigData extends Partial<GatewayOptions> {
+    // Allow any string keys for flexibility, but known keys should be strongly typed if possible.
+    [key: string]: unknown;
+    FRONTEND_PORT?: number;
 }
 
 export function StatusTab() {

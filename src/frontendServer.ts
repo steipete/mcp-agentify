@@ -1,4 +1,4 @@
-// src/debugWebServer.ts
+// src/frontendServer.ts
 import * as http from 'node:http';
 import express, { type Request, type Response, type NextFunction, type Application, type RequestHandler } from 'express';
 import { WebSocketServer, WebSocket } from 'ws'; // Ensure WebSocket is imported as a value
@@ -15,7 +15,7 @@ import type { McpRequester } from './server'; // Corrected import path assuming 
 
 const MAX_BUFFER_SIZE = 500; // Max entries for logs/traces in memory
 
-export class DebugWebServer {
+export class FrontendServer {
     private app: Application;
     private httpServer: http.Server;
     private wss: WebSocketServer;
@@ -31,7 +31,7 @@ export class DebugWebServer {
     // In-memory buffers for logs and traces
     private logBuffer: LogEntry[] = [];
     private mcpTraceBuffer: McpTraceEntry[] = [];
-    private debugLogPassthroughStream: Writable | undefined;
+    private logPassthroughStream: Writable | undefined;
 
     constructor(
         port: number,
@@ -41,7 +41,7 @@ export class DebugWebServer {
         initialConfig?: Partial<GatewayOptions>,
     ) {
         this.port = port;
-        this.logger = mainLogger.child({ component: 'DebugWebServer' });
+        this.logger = mainLogger.child({ component: 'FrontendServer' });
         this.backendManager = initialBackendManager; // Can be undefined
         this.initialEnvConfig = initialConfig ? this.sanitizePartialConfig(initialConfig) : undefined;
         this.gatewayOptions = initialConfig ? this.sanitizePartialConfig(initialConfig) as GatewayOptions : undefined;
@@ -54,12 +54,12 @@ export class DebugWebServer {
         this.setupApiRoutes();
         this.setupWebSockets();
 
-        this.logger.info('DebugWebServer initialized.');
+        this.logger.info('Frontend WebServer initialized.');
         this.initializeLogStream();
     }
 
     private initializeLogStream(): void {
-        this.debugLogPassthroughStream = new Writable({
+        this.logPassthroughStream = new Writable({
             objectMode: false, // Expects strings or Buffers from Pino
             write: (chunk, encoding, callback) => {
                 try {
@@ -95,7 +95,7 @@ export class DebugWebServer {
                             // If it's not JSON, or already pretty-printed, log it as a simple message string
                             // This can happen if pino-pretty is active AND we are tapping into the stream
                             // Ideally, for the debug stream, pino should output raw JSON.
-                            this.logger.trace({ rawChunk: logString, err: jsonError }, "DebugLogStream: Failed to parse log line as JSON, adding as raw.");
+                            this.logger.trace({ rawChunk: logString, err: jsonError }, "LogStream: Failed to parse log line as JSON, adding as raw.");
                             const fallbackEntry: LogEntry = {
                                 timestamp: Date.now(),
                                 level: 'INFO', // Default level for unparseable lines
@@ -105,20 +105,20 @@ export class DebugWebServer {
                         }
                     }
                 } catch (error) {
-                    this.logger.error({ err: error, chunk }, "Error processing log chunk in DebugWebServer's stream.");
+                    this.logger.error({ err: error, chunk }, "Error processing log chunk in FrontendServer's stream.");
                 }
                 callback();
             },
         });
-        this.logger.info('Debug log passthrough stream initialized for capturing Pino logs.');
+        this.logger.info('Log passthrough stream initialized for capturing Pino logs.');
     }
 
     public getLogStream(): Writable | undefined {
-        return this.debugLogPassthroughStream;
+        return this.logPassthroughStream;
     }
 
     private sanitizeConfig(config: GatewayOptions): GatewayOptions {
-        this.logger.debug('Sanitizing gateway configuration for debug API.');
+        this.logger.debug('Sanitizing gateway configuration for frontend API.');
         const sanitized: GatewayOptions = JSON.parse(JSON.stringify(config)); // Assume full structure initially
 
         if (sanitized.OPENAI_API_KEY) {
@@ -149,7 +149,7 @@ export class DebugWebServer {
     }
 
     private sanitizePartialConfig(config: Partial<GatewayOptions>): Partial<GatewayOptions> {
-        this.logger.debug({configKeys: Object.keys(config)}, 'Sanitizing partial gateway configuration for debug API.');
+        this.logger.debug({configKeys: Object.keys(config)}, 'Sanitizing partial gateway configuration for frontend API.');
         const sanitized: Partial<GatewayOptions> = JSON.parse(JSON.stringify(config)); 
 
         if (sanitized.OPENAI_API_KEY) {
@@ -178,10 +178,10 @@ export class DebugWebServer {
 
     private setupExpressMiddleware(): void {
         this.app.use(express.json()); // For parsing application/json in potential POST routes
-        // Serve static files from public_debug_ui
-        const staticPath = resolve(process.cwd(), 'public_debug_ui');
+        // Serve static files from frontend/public
+        const staticPath = resolve(process.cwd(), 'frontend/public');
         this.app.use(express.static(staticPath));
-        this.logger.info({ path: staticPath }, 'Serving static files for debug UI.');
+        this.logger.info({ path: staticPath }, 'Serving static files for frontend.');
 
         // Basic root route for HTML file
         this.app.get('/', (req, res) => {
@@ -190,7 +190,7 @@ export class DebugWebServer {
     }
 
     private setupApiRoutes(): void {
-        this.logger.info('Setting up API routes for DebugWebServer.');
+        this.logger.info('Setting up API routes for FrontendServer.');
 
         const statusHandler: RequestHandler = (req, res) => {
             this.logger.debug('Request received for /api/status');
@@ -227,14 +227,14 @@ export class DebugWebServer {
         const configDetailsHandler: RequestHandler = (req, res) => {
             this.logger.debug('Request received for /api/config-details.');
             res.json({
-                initialEnvConfig: this.initialEnvConfig || { note: 'Not set or DWS started post-env phase' },
+                initialEnvConfig: this.initialEnvConfig || { note: 'Not set or server started post-env phase' },
                 clientSentInitOptions: this.clientSentInitOptions || { note: 'Initialize request not yet received/processed' },
                 finalEffectiveConfig: this.finalEffectiveConfig || { note: 'Final configuration not yet set' }
             });
         };
         this.app.get('/api/config-details', configDetailsHandler);
 
-        // Placeholder for /api/logs and /api/traces (Subtask 8.2 continued)
+        // Placeholder for /api/logs and /api/traces
         const logsHandler: RequestHandler = (req, res) => {
             this.logger.debug({ query: req.query }, 'Request received for /api/logs');
             const page = Number.parseInt(req.query.page as string || '0', 10);
@@ -270,10 +270,10 @@ export class DebugWebServer {
         // New endpoint for ChatTab to send requests to dynamic agents
         const chatWithAgentHandler: RequestHandler = async (req, res, next) => {
             const { agentMethod, params } = req.body as { agentMethod: string; params: { query: string; context?: any } };
-            this.logger.info({ agentMethod, params }, '[DebugWebServer] Received /api/chat-with-agent request.');
+            this.logger.info({ agentMethod, params }, '[FrontendServer] Received /api/chat-with-agent request.');
 
             if (!this.mcpRequester) {
-                this.logger.error('[DebugWebServer] McpRequester not available for /api/chat-with-agent.');
+                this.logger.error('[FrontendServer] McpRequester not available for /api/chat-with-agent.');
                 res.status(503).json({ error: 'MCP Requester not available. Gateway might still be initializing.' });
                 return;
             }
@@ -284,10 +284,10 @@ export class DebugWebServer {
 
             try {
                 const result = await this.mcpRequester(agentMethod, params);
-                this.logger.info({ agentMethod, result }, '[DebugWebServer] Response from internal MCP request for agent chat.');
+                this.logger.info({ agentMethod, result }, '[FrontendServer] Response from internal MCP request for agent chat.');
                 res.json(result);
             } catch (error: any) {
-                this.logger.error({ err: error, agentMethod }, '[DebugWebServer] Error calling agent via mcpRequester.');
+                this.logger.error({ err: error, agentMethod }, '[FrontendServer] Error calling agent via mcpRequester.');
                 res.status(500).json({ 
                     error: 'Failed to call agent', 
                     message: error.message, 
@@ -299,27 +299,52 @@ export class DebugWebServer {
     }
 
     private setupWebSockets(): void {
-        this.logger.info('Setting up WebSocket listeners (placeholder for Subtask 8.3)');
+        this.logger.info('Setting up WebSocket listeners');
         this.wss.on('connection', (ws: WebSocket) => {
-            this.logger.info('Debug WebSocket client connected.');
+            this.logger.info('WebSocket client connected.');
             ws.on('message', (message: Buffer | string) => {
                 this.logger.debug({ message: message.toString() }, 'Received WebSocket message (ignored for now)');
             });
             ws.on('close', () => {
-                this.logger.info('Debug WebSocket client disconnected.');
+                this.logger.info('WebSocket client disconnected.');
             });
             ws.on('error', (error: Error) => {
-                this.logger.error({ err: error }, 'Debug WebSocket error.');
+                this.logger.error({ err: error }, 'WebSocket error.');
             });
             // Send a welcome message or initial state if needed
-            ws.send(JSON.stringify({ type: 'info', message: 'Connected to mcp-agentify debug WebSocket server.' }));
+            ws.send(JSON.stringify({ type: 'info', message: 'Connected to mcp-agentify WebSocket server.' }));
         });
     }
 
     public start(): void {
-        this.httpServer.listen(this.port, () => {
-            this.logger.info(`DebugWebServer listening on http://localhost:${this.port}`);
-        });
+        const maxRetries = 10;
+        let retryCount = 0;
+        const startServer = (port: number): void => {
+            this.httpServer.listen(port)
+                .on('listening', () => {
+                    this.port = port; // Update the port with the one we actually bound to
+                    this.logger.info(`Frontend WebServer listening on http://localhost:${port}`);
+                })
+                .on('error', (err: NodeJS.ErrnoException) => {
+                    if (err.code === 'EADDRINUSE') {
+                        const nextPort = port + 1;
+                        retryCount++;
+                        if (retryCount < maxRetries) {
+                            this.logger.warn(`Port ${port} in use, trying port ${nextPort}`);
+                            startServer(nextPort);
+                        } else {
+                            this.logger.fatal(`Failed to find an available port after ${maxRetries} attempts (tried ${this.port}-${port})`);
+                            throw new Error(`Unable to start server: all ports in range ${this.port}-${port} are in use`);
+                        }
+                    } else {
+                        // For any other error type, log and rethrow immediately
+                        this.logger.error({ err }, `Error starting server on port ${port}`);
+                        throw err;
+                    }
+                });
+        };
+
+        startServer(this.port);
     }
 
     public getPort(): number {
@@ -328,7 +353,7 @@ export class DebugWebServer {
 
     public stop(): Promise<void> {
         return new Promise((resolve, reject) => {
-            this.logger.info('Attempting to stop DebugWebServer...');
+            this.logger.info('Attempting to stop FrontendServer...');
             for (const client of this.wss.clients) {
                 client.terminate();
             }
@@ -347,7 +372,7 @@ export class DebugWebServer {
         });
     }
 
-    // Methods for Subtask 8.3 to add logs/traces and broadcast them
+    // Methods to add logs/traces and broadcast them
     public addLogEntry(logEntry: LogEntry): void {
         if (this.logBuffer.length >= MAX_BUFFER_SIZE) {
             this.logBuffer.shift(); // Remove oldest
@@ -373,7 +398,7 @@ export class DebugWebServer {
         }
     }
 
-    // Getter methods for API endpoints (Subtask 8.2)
+    // Getter methods for API endpoints
     public getLogBuffer(): LogEntry[] {
         return [...this.logBuffer];
     }
@@ -382,13 +407,13 @@ export class DebugWebServer {
     }
 
     public updateLogger(newLogger: PinoLoggerBase<PinoLogLevel>): void {
-        this.logger = newLogger.child({ component: 'DebugWebServer' });
+        this.logger = newLogger.child({ component: 'FrontendServer' });
         this.logger.info('Successfully updated internal logger instance.');
     }
 
     // Method to receive client-sent initializationOptions (should be the validated & parsed version)
     public setClientSentInitOptions(options: GatewayClientInitOptions): void {
-        this.logger.debug({ options }, 'DebugWebServer received client-sent initializationOptions.');
+        this.logger.debug({ options }, 'FrontendServer received client-sent initializationOptions.');
         // Sanitize if it contains sensitive fields directly (though it shouldn't for core config)
         const sanitizedOptions: GatewayClientInitOptions = JSON.parse(JSON.stringify(options));
         if (sanitizedOptions.OPENAI_API_KEY) {
@@ -403,19 +428,19 @@ export class DebugWebServer {
 
     // Method to receive the final effective merged configuration
     public setFinalEffectiveConfig(config: GatewayOptions): void {
-        this.logger.debug({ configKeys: Object.keys(config) }, 'DebugWebServer received final effective configuration.');
+        this.logger.debug({ configKeys: Object.keys(config) }, 'FrontendServer received final effective configuration.');
         this.finalEffectiveConfig = this.sanitizeConfig(config); // sanitizeConfig expects full GatewayOptions
         // Update the general this.gatewayOptions for the /api/config endpoint to reflect the latest final config
         this.gatewayOptions = this.finalEffectiveConfig;
     }
 
     public setMcpRequester(requester: McpRequester): void {
-        this.logger.info('[DebugWebServer] McpRequester received.');
+        this.logger.info('[FrontendServer] McpRequester received.');
         this.mcpRequester = requester;
     }
 
     public setBackendManager(manager: BackendManager): void {
-        this.logger.info('[DebugWebServer] BackendManager received.');
+        this.logger.info('[FrontendServer] BackendManager received.');
         this.backendManager = manager; 
         // Potentially re-fetch/update status if UI is already loaded and needs new backend states
     }

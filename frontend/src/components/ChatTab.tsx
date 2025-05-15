@@ -1,6 +1,6 @@
 import { h, Fragment } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
-import type { OrchestrationContext } from '../../src/interfaces'; // For context passing
+import type { OrchestrationContext } from '../../../src/interfaces'; // Adjusted path
 
 interface Agent {
     id: string; // e.g., "openai_gpt-4.1"

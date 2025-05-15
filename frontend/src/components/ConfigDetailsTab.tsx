@@ -4,8 +4,8 @@ import { useState, useEffect } from 'preact/hooks';
 // Import actual types for better type safety if they are simple enough
 // For this component, it receives GatewayOptions and GatewayClientInitOptions directly from the API
 // so we might not need to import the full Zod schemas here, just the TS types if available
-import type { GatewayOptions } from '../../src/interfaces'; // GatewayOptions is from interfaces (re-exported from schemas)
-import type { GatewayClientInitOptions } from '../../src/schemas'; // GatewayClientInitOptions is directly from schemas
+import type { GatewayOptions } from '../../../src/interfaces'; // Adjusted path
+import type { GatewayClientInitOptions } from '../../../src/schemas'; // Adjusted path
 
 interface ConfigDetailsData {
     initialEnvConfig?: Partial<GatewayOptions>;
