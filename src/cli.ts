@@ -2,9 +2,18 @@
 // src/cli.ts
 import 'dotenv/config'; // Load .env file at the very top
 
-// Earliest possible point to check raw environment variable
+console.error(`[CLI PRE-INIT] Script CWD: ${process.cwd()}`);
 console.error(`[CLI PRE-INIT] Raw process.env.LOG_LEVEL: ${process.env.LOG_LEVEL}`);
 console.error(`[CLI PRE-INIT] Raw process.env.FRONTEND_PORT: ${process.env.FRONTEND_PORT}`);
+const apiKey = process.env.OPENAI_API_KEY;
+if (apiKey) {
+    const first5 = apiKey.substring(0, 5);
+    const last5 = apiKey.substring(apiKey.length - 5);
+    console.error(`[CLI PRE-INIT] Raw process.env.OPENAI_API_KEY: ${first5}.....${last5} (Length: ${apiKey.length})`);
+} else {
+    console.error(`[CLI PRE-INIT] Raw process.env.OPENAI_API_KEY: undefined`);
+}
+console.error(`[CLI PRE-INIT] Raw process.env.AGENTS: ${process.env.AGENTS}`);
 
 import { startAgentifyServer } from './server';
 import { initializeLogger, getLogger } from './logger';
