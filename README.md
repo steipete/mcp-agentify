@@ -354,6 +354,7 @@ npm run test:coverage
 -   Set the `AGENTS` environment variable as a comma-separated string of `"Vendor/ModelName"` pairs.
     -   **Format:** `AGENTS="Vendor1/ModelNameA,Vendor2/ModelNameB"`
     -   **Example:** `AGENTS="OpenAI/gpt-4.1,OpenAI/o3"`
+    -   **Note on "OpenAI" vendor:** The vendor name "OpenAI" is treated case-insensitively and will be standardized to lowercase `openai` (e.g., "OPENAI/gpt-4.1" becomes "openai/gpt-4.1"). Other vendor names are case-sensitive.
     -   (Ensure the model names are valid for the specified vendor, e.g., as per OpenAI API documentation for `gpt-4.1`, `o3`, etc.)
 -   For each entry, `mcp-agentify` will register an MCP method:
     -   The `Vendor/ModelName` string is sanitized (non-alphanumerics, including `/`, become `_`).

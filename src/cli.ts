@@ -41,14 +41,29 @@ async function main() {
     // Read and parse AGENTS environment variable (comma-separated Vendor/ModelName)
     if (process.env.AGENTS) {
         try {
-            // Split by comma, then trim whitespace from each part. Filter out any empty strings that might result.
-            const parsedAgents = process.env.AGENTS.split(',').map(agent => agent.trim()).filter(agent => agent.length > 0);
-            if (parsedAgents.length > 0 && parsedAgents.every(item => typeof item === 'string' && item.includes('/'))) {
-                initialCliOptions.gptAgents = parsedAgents; // Keep storing in gptAgents for now, type is string[]
-                cliLogger.info({ gptAgents: parsedAgents }, 'AGENTS environment variable processed.');
-            } else {
-                cliLogger.warn('AGENTS environment variable is not a valid comma-separated list of Vendor/ModelName strings (e.g., OpenAI/gpt-4.1). Ignoring.');
+            const agentStrings = process.env.AGENTS.split(',').map(agent => agent.trim()).filter(agent => agent.length > 0);
+            const processedAgents: string[] = [];
+
+            for (const agentStr of agentStrings) {
+                if (typeof agentStr === 'string' && agentStr.includes('/')) {
+                    let [vendor, modelName] = agentStr.split('/', 2);
+                    if (vendor.toLowerCase() === 'openai') {
+                        vendor = 'openai'; // Standardize to lowercase for OpenAI
+                    }
+                    processedAgents.push(`${vendor}/${modelName}`);
+                } else {
+                    cliLogger.warn(`Invalid agent format: '${agentStr}'. Expected 'Vendor/ModelName'. Skipping.`);
+                }
             }
+
+            if (processedAgents.length > 0) {
+                initialCliOptions.gptAgents = processedAgents;
+                cliLogger.info({ gptAgents: processedAgents }, 'AGENTS environment variable processed.');
+            } else if (agentStrings.length > 0) { // Some parts were there but all invalid
+                 cliLogger.warn('AGENTS environment variable contained no valid Vendor/ModelName entries after parsing.');
+            }
+            // If agentStrings was empty from start, no warning needed here.
+
         } catch (error) {
             cliLogger.warn({ err: error, rawValue: process.env.AGENTS }, 'Error processing AGENTS environment variable. Ensure it is a comma-separated string. Ignoring.');
         }
