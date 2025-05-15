@@ -223,6 +223,70 @@ After building the project, you can run the compiled JavaScript version.
 
     When packaged and published to NPM, users would typically run it via `npx @your-scope/mcp-agentify`.
 
+### 3. Local Development with Direct Script Execution (e.g., for IDE Integration)
+
+This method is for developers contributing to `mcp-agentify` or those who want to integrate their local, source-code version directly with an IDE like Cursor or Windsurf for testing.
+It uses the `scripts/dev.sh` script as the direct entry point for the MCP server, which in turn uses `ts-node` for live TypeScript execution.
+
+1.  **Clone the Repository (if not already done):**
+    ```bash
+    git clone https://github.com/steipete/mcp-agentify.git
+    cd mcp-agentify
+    ```
+
+2.  **Install Dependencies:**
+    This will also ensure `ts-node` and `nodemon` (used by `dev.sh`) are available.
+    ```bash
+    npm install
+    ```
+
+3.  **Make the Development Script Executable:**
+    ```bash
+    chmod +x scripts/dev.sh
+    ```
+
+4.  **Configure Your MCP Client (e.g., Cursor or Windsurf):
+    You'll need to tell your IDE or MCP client tool to run `mcp-agentify` using the `dev.sh` script. This typically involves updating a configuration file (e.g., `mcp.json` for Cursor/Windsurf) to point to the absolute path of this script.
+
+    **Example Configuration (conceptual for a `mcp.json`-like file):**
+    Imagine your IDE has a configuration where you define MCP servers. You would add an entry for `mcp-agentify` like this:
+
+    ```json
+    {
+      "mcpServers": {
+        "agentify-dev": {  // A custom name for this configuration
+          "type": "stdio",
+          "command": ["/absolute/path/to/your/mcp-agentify/scripts/dev.sh"],
+          "args": [], // dev.sh doesn't typically take arguments directly for this use case
+          "initializationOptions": {
+            // Your desired initializationOptions go here (see Configuration section)
+            // For example:
+            "logLevel": "trace",
+            "DEBUG_PORT": 3002, // Use a different port if npm run dev uses 3001
+            "OPENAI_API_KEY": "sk-YourOpenAIKeyFromASecureSource",
+            "backends": [
+              {
+                "id": "filesystem",
+                "displayName": "Local Filesystem (Dev Script)",
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"]
+              }
+              // ... other backends ...
+            ]
+          }
+        }
+        // ... other MCP server configurations ...
+      }
+    }
+    ```
+
+    **Important Notes:**
+    *   **Replace `/absolute/path/to/your/mcp-agentify/scripts/dev.sh`** with the actual absolute path to the `dev.sh` script in your cloned repository.
+    *   The `initializationOptions` provided here will be sent to the `mcp-agentify` instance started by `dev.sh`.
+    *   Ensure your `.env` file in the `mcp-agentify` project root is configured (especially `OPENAI_API_KEY`), as `dev.sh` will execute `ts-node ./src/cli.ts` within that project context, which loads the `.env` file.
+    *   This setup allows you to make changes to the `mcp-agentify` TypeScript source code, and `nodemon` (within `dev.sh`) will automatically restart the server, reflecting your changes in the IDE integration without needing a full rebuild or reinstall.
+
 ## Debug Web UI
 
 `mcp-agentify` includes an optional Debug Web UI that can be invaluable for observing the gateway's internal operations, logs, and the MCP messages being exchanged.
