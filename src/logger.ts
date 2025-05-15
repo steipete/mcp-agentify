@@ -43,7 +43,7 @@ export function initializeLogger(
                 destination: 2, // Send pretty output to stderr (fd 2) to avoid interfering with JSON-RPC over stdout
             },
         };
-        // pino-pretty handles its own output, typically to process.stdout.
+        // pino-pretty with destination:2 handles stderr output, but we need to make sure any 'normal' logs also go to stderr
         // If testDestination is also provided, it implies we might want non-pretty logs there.
         if (testDestination) {
              // Add testDestination for raw logs if testing alongside pretty-printing to console.
@@ -181,3 +181,4 @@ export function resetLoggerForTest(): void {
     }
     loggerInstance = undefined;
 }
+ 
