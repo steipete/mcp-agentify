@@ -1,0 +1,71 @@
+{
+    "name": "mcp-agentify",
+    "version": "1.0.0",
+    "description": "MCP orchestrator that converts MPC servers to agents.",
+    "main": "dist/cli.js",
+    "bin": {
+        "mcp-agentify": "./bin/mcp-agentify.cjs"
+    },
+    "files": [
+        "dist/**/*",
+        "bin/**/*",
+        "README.md",
+        "LICENSE"
+    ],
+    "directories": {
+        "doc": "docs",
+        "test": "tests"
+    },
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/cli.js",
+        "dev": "nodemon --watch src --ext ts,json --exec \"ts-node ./src/cli.ts\"",
+        "lint": "eslint \"src/**/*.ts\"",
+        "lint:fix": "eslint \"src/**/*.ts\" --fix",
+        "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"*.json\" \"*.md\"",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/steipete/mcp-agentify.git"
+    },
+    "keywords": [],
+    "author": "Your Name or Org",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/steipete/mcp-agentify/issues"
+    },
+    "homepage": "https://github.com/steipete/mcp-agentify#readme",
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "dependencies": {
+        "dotenv": "^16.5.0",
+        "express": "^5.1.0",
+        "openai": "^4.98.0",
+        "pino": "^9.6.0",
+        "vscode-jsonrpc": "^8.2.1",
+        "vscode-languageserver-protocol": "^3.17.5",
+        "ws": "^8.18.2",
+        "zod": "^3.24.4"
+    },
+    "devDependencies": {
+        "@types/express": "^5.0.1",
+        "@types/node": "^22.15.18",
+        "@types/ws": "^8.18.1",
+        "@typescript-eslint/eslint-plugin": "^8.32.1",
+        "@typescript-eslint/parser": "^8.32.1",
+        "eslint": "^9.26.0",
+        "eslint-config-prettier": "^10.1.5",
+        "eslint-plugin-prettier": "^5.4.0",
+        "nodemon": "^3.1.10",
+        "pino-pretty": "^13.0.0",
+        "prettier": "^3.5.3",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.8.3",
+        "typescript-eslint": "^8.32.1",
+        "vitest": "^3.1.3"
+    }
+}
