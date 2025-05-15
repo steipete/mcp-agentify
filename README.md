@@ -76,7 +76,7 @@ This example shows how a client might configure the gateway with a filesystem ba
 ```json
 {
   "logLevel": "trace",
-  "OPENAI_API_KEY": "sk-ClientProvidedKeyIfNeededAsFallback", // Can be overridden by gateway's .env
+  "OPENAI_API_KEY": "sk-ClientProvidedKeyIfNeededAsFallback",
   "DEBUG_PORT": 3001,
   "backends": [
     {
@@ -85,13 +85,13 @@ This example shows how a client might configure the gateway with a filesystem ba
       "type": "stdio",
       "command": "npx",
       "args": [
-        "-y", 
-        "@modelcontextprotocol/server-filesystem", 
-        "/Users/Shared/Projects", // Example: Path accessible by the filesystem backend
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/Shared/Projects",
         "/tmp/agentify-work"
       ],
-      "env": { 
-        "FILESYSTEM_LOG_LEVEL": "debug" // Custom env var for this specific backend
+      "env": {
+        "FILESYSTEM_LOG_LEVEL": "debug"
       }
     },
     {
@@ -100,11 +100,11 @@ This example shows how a client might configure the gateway with a filesystem ba
       "type": "stdio",
       "command": "npx",
       "args": [
-        "-y", 
-        "@smithery/cli@latest", 
-        "run", 
-        "@browserbasehq/mcp-browserbase", 
-        "--key", "bb_api_YOUR_KEY_FROM_USER_CONFIG" // API key passed as an argument to the backend
+        "-y",
+        "@smithery/cli@latest",
+        "run",
+        "@browserbasehq/mcp-browserbase",
+        "--key", "bb_api_YOUR_KEY_FROM_USER_CONFIG"
       ]
     }
   ]
@@ -122,6 +122,48 @@ This example shows how a client might configure the gateway with a filesystem ba
     *   `command`: The command to execute to start the backend MCP server (e.g., `npx`, `node`, or a direct path to an executable).
     *   `args` (optional): An array of string arguments to pass to the `command`.
     *   `env` (optional): A key-value map of additional environment variables to set for the spawned backend process.
+
+**Example `initializationOptions` (for IDE settings):**
+
+```json
+{
+  "logLevel": "debug",
+  "OPENAI_API_KEY": "sk-YourOpenAIKeyFromASecureSource",
+  "DEBUG_PORT": 3001,
+  "backends": [
+    {
+      "id": "filesystem",
+      "displayName": "Local Filesystem",
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}",
+        "/tmp/shared_work_area"
+      ],
+      "env": {
+        "FILESYSTEM_LOG_LEVEL": "info"
+      }
+    },
+    {
+      "id": "mcpBrowserbase",
+      "displayName": "Web Browser via Browserbase",
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@smithery/cli@latest",
+        "run",
+        "@browserbasehq/mcp-browserbase",
+        "--key", "bb_api_YOUR_BROWSERBASE_KEY"
+      ]
+    }
+  ]
+}
+```
+
+**Explanation for IDE Users:**
 
 ## How to Run
 
