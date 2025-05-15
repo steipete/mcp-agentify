@@ -136,12 +136,8 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
     if (frontendServerInstance && mcpRequester && typeof frontendServerInstance.setMcpRequester === 'function') {
         frontendServerInstance.setMcpRequester(mcpRequester);
     }
-    if (frontendServerInstance && internalGatewayOptions && typeof frontendServerInstance.setInitialEnvConfig === 'function') {
-        // Pass the initial config (from env) to the frontend server for display
-        frontendServerInstance.setInitialEnvConfig(internalGatewayOptions);
-    }
 
-    // Dynamically register agent methods based on AGENTS from environment NOW
+    // Dynamic agent registration
     if (internalGatewayOptions.gptAgents && internalGatewayOptions.gptAgents.length > 0) {
         pinoLogger.info(
             { agents: internalGatewayOptions.gptAgents },
@@ -150,27 +146,42 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
         for (const fullAgentString of internalGatewayOptions.gptAgents) {
             const sanitizedMethodPart = fullAgentString.replace(/[^a-zA-Z0-9_\/]/g, '_').replace(/\//g, '_');
             const methodName = `agentify/agent_${sanitizedMethodPart}`;
-            pinoLogger.info(`[GATEWAY SERVER] Registering method: ${methodName} for agent: ${fullAgentString}`);
-            connection.onRequest(methodName, async (requestParams: { query: string; context?: OrchestrationContext }) => {
-                pinoLogger.info(
-                    { method: methodName, agent: fullAgentString, params: requestParams },
-                    `Dynamic agent method ${methodName} called.`,
-                );
-                if (!llmOrchestrator) { // LLM Orchestrator is initialized later, in onInitialize
-                    pinoLogger.error({ method: methodName }, 'LLMOrchestrator not available yet for dynamic agent call (waits for client 'initialize').');
-                    // Return a specific error or a pending state if called too early
+            pinoLogger.info(
+                `[GATEWAY SERVER] Registering method: ${methodName} for agent: ${fullAgentString}`
+            );
+            connection.onRequest(
+                methodName, 
+                async (requestParams: { query: string; context?: OrchestrationContext }) => {
+                    pinoLogger.info(
+                        { method: methodName, agent: fullAgentString, params: requestParams },
+                        `Dynamic agent method ${methodName} called.`,
+                    );
+                    if (!llmOrchestrator) {
+                        pinoLogger.error(
+                            { method: methodName }, 
+                            "LLMOrchestrator not available yet for dynamic agent call (waits for client 'initialize')."
+                        );
+                        return {
+                            message: `Agent '${fullAgentString}' called too early. LLM Orchestrator not ready.`,
+                            note: "LLM Orchestrator is initialized after client sends MCP 'initialize' request."
+                        };
+                    }
+                    if (!internalGatewayOptions.OPENAI_API_KEY) { // Check API key before attempting to use LLM
+                        pinoLogger.error(
+                            { method: methodName, agent: fullAgentString }, 
+                            "Cannot process dynamic agent request: OpenAI API key is not configured."
+                        );
+                        throw new ResponseError(ErrorCodes.InternalError, "OpenAI API key not configured for this agent.");
+                    }
+                    // TODO: Future - llmOrchestrator.invokeAgent(fullAgentString, requestParams.query, requestParams.context);
                     return {
-                        message: `Agent '${fullAgentString}' called too early. LLM Orchestrator not ready.`,
-                        note: "LLM Orchestrator is initialized after client sends MCP 'initialize' request."
+                        message: `Agent '${fullAgentString}' received query: "${requestParams.query}". Context: ${JSON.stringify(
+                            requestParams.context || {},
+                        )}`,
+                        note: 'This is a placeholder response. Full LLM interaction for dynamic agents is not yet implemented for early calls.',
                     };
-                    // throw new ResponseError(ErrorCodes.ServerNotInitialized, 'LLMOrchestrator not initialized, waiting for client connection');
                 }
-                // Actual LLM call would go here, via llmOrchestrator
-                return {
-                    message: `Agent '${fullAgentString}' received query: "${requestParams.query}". Context: ${JSON.stringify(requestParams.context || {})}`,
-                    note: 'This is a placeholder response. Full LLM interaction for dynamic agents is not yet implemented for early calls.',
-                };
-            });
+            );
         }
     }
 
@@ -233,7 +244,10 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
     connection.onRequest(
         new RequestType<InitializeParams, InitializeResult, ResponseError<undefined>>('initialize'),
         async (params: InitializeParams, _token: CancellationToken): Promise<InitializeResult> => {
-            pinoLogger.info({ initParamsReceivedClient: params.initializationOptions }, "[GATEWAY SERVER] 'initialize' handler: Received options from client.");
+            pinoLogger.info(
+                { initParamsReceivedClient: params.initializationOptions },
+                "[GATEWAY SERVER] 'initialize' handler: Received options from client."
+            );
 
             const clientOptionsValidation = GatewayClientInitOptionsSchema.safeParse(params.initializationOptions);
             if (!clientOptionsValidation.success) {
@@ -267,7 +281,9 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
             if (!internalGatewayOptions.OPENAI_API_KEY) {
                 const errorMsg = 'OpenAI API Key is required and was not set in environment.';
                 pinoLogger.error(errorMsg);
-                throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { missingKey: 'OPENAI_API_KEY' });
+                throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { 
+                    missingKey: 'OPENAI_API_KEY', 
+                });
             }
             
             pinoLogger.info(
@@ -282,7 +298,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
             }
 
             llmOrchestrator = new LLMOrchestratorService(
-                internalGatewayOptions.OPENAI_API_KEY!, 
+                internalGatewayOptions.OPENAI_API_KEY,
                 internalGatewayOptions.backends,
                 pinoLogger,
             );
