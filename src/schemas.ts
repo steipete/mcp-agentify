@@ -27,7 +27,8 @@ export type OrchestrationContext = z.infer<typeof OrchestrationContextSchema>;
 // This schema now primarily validates the structure of `backends` when parsing client-provided initializationOptions.
 // Core gateway settings (logLevel, OPENAI_API_KEY, FRONTEND_PORT) are now strictly environment-driven and set pre-MCP handshake.
 export const GatewayClientInitOptionsSchema = z.object({
-    backends: z.array(BackendConfigSchema).min(1, 'At least one backend configuration is required.'),
+    // Backends are now optional; if omitted, the gateway will run with zero backends and expose only dynamic agents
+    backends: z.array(BackendConfigSchema).optional().default([]),
     // The following are optional if a client *really* wants to send them, but mcp-agentify will ignore them
     // in favor of environment variables for its own configuration.
     logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional(),
@@ -56,6 +57,7 @@ export const GatewayOptionsSchema = z.object({
     // `backends` configuration is primarily client-driven via initializationOptions.
     backends: z.array(BackendConfigSchema).min(1, 'At least one backend configuration is required.'),
     gptAgents: z.array(z.string()).optional(), // For dynamically exposed agent methods
+    projectRoot: z.string().optional(), // NEW: For explicit project root path
 });
 export type GatewayOptions = z.infer<typeof GatewayOptionsSchema>;
 

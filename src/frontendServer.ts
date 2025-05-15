@@ -11,6 +11,7 @@ import type { GatewayClientInitOptions } from './schemas'; // Import from schema
 import { Writable } from 'node:stream'; // Import Writable
 import type { McpRequester } from './server'; // Corrected import path assuming server.ts is in the same directory
 import { getPackageVersion } from './utils'; // Import from new utils.ts
+import type { LLMOrchestratorService } from './llmOrchestrator'; // Add this import
 
 // Forward declaration for types used by LogBuffer/TraceBuffer if they are complex
 
@@ -28,24 +29,52 @@ export class FrontendServer {
     private clientSentInitOptions?: GatewayClientInitOptions; // Store the validated client options
     private finalEffectiveConfig?: GatewayOptions;
     private mcpRequester?: McpRequester;
+    private readonly llmOrchestrator?: LLMOrchestratorService; // Make readonly if set only in constructor
 
     // In-memory buffers for logs and traces
     private logBuffer: LogEntry[] = [];
     private mcpTraceBuffer: McpTraceEntry[] = [];
     private logPassthroughStream: Writable | undefined;
 
+    // Add a new private member to store the raw AGENTS string if passed
+    private rawAgentsString?: string;
+    private readonly rawLogLevelString?: string; // To store the original logLevel casing if needed, though usually it is logLevel
+    private readonly projectRoot?: string; // << NEW: Store projectRoot
+
     constructor(
         port: number,
         mainLogger: PinoLoggerBase<PinoLogLevel>,
-        // backendManager is now passed via a setter after BackendManager is fully initialized
-        initialBackendManager?: BackendManager, // Keep it optional in constructor for early start
+        initialBackendManager?: BackendManager,
         initialConfig?: Partial<GatewayOptions>,
+        rawAgentsEnvString?: string,
+        llmOrchestratorInstance?: LLMOrchestratorService // << NEW constructor parameter
     ) {
         this.port = port;
         this.logger = mainLogger.child({ component: 'FrontendServer' });
-        this.backendManager = initialBackendManager; // Can be undefined
+        this.backendManager = initialBackendManager;
         this.initialEnvConfig = initialConfig ? this.sanitizePartialConfig(initialConfig) : undefined;
         this.gatewayOptions = initialConfig ? this.sanitizePartialConfig(initialConfig) as GatewayOptions : undefined;
+        this.rawAgentsString = rawAgentsEnvString;
+        this.rawLogLevelString = initialConfig?.logLevel;
+        this.projectRoot = initialConfig?.projectRoot;
+        this.llmOrchestrator = llmOrchestratorInstance; // << ASSIGN in constructor
+
+        if (this.projectRoot) {
+            try {
+                this.logger.info({ currentCwdBeforeChdir: process.cwd(), targetProjectRoot: this.projectRoot }, "[FrontendServer] Attempting to chdir to configured projectRoot.");
+                process.chdir(this.projectRoot); // << FORCE CHDIR
+                this.logger.info({ currentCwdAfterChdir: process.cwd() }, "[FrontendServer] chdir successful.");
+            } catch (errChdir) {
+                this.logger.error({ err: errChdir, targetProjectRoot: this.projectRoot }, "[FrontendServer] FAILED to chdir. Static paths might be incorrect.");
+            }
+        } else {
+            this.logger.warn('[FrontendServer] projectRoot was not explicitly provided via initialConfig. Static file serving will use current process.cwd().');
+        }
+        this.logger.info({ 
+            configuredProjectRoot: this.projectRoot, 
+            currentProcessCwd: process.cwd(), 
+            llmOrchestratorAvailable: !!this.llmOrchestrator 
+        }, '[FrontendServer] Instance created.');
 
         this.app = express();
         this.httpServer = http.createServer(this.app);
@@ -178,15 +207,34 @@ export class FrontendServer {
     }
 
     private setupExpressMiddleware(): void {
-        this.app.use(express.json()); // For parsing application/json in potential POST routes
-        // Serve static files from frontend/public
-        const staticPath = resolve(process.cwd(), 'frontend/public');
-        this.app.use(express.static(staticPath));
-        this.logger.info({ path: staticPath }, 'Serving static files for frontend.');
+        this.app.use(express.json());
+        
+        const effectiveProjectRoot = this.projectRoot || process.cwd(); // Should be redundant if chdir worked and projectRoot was set
+        if (!this.projectRoot) {
+            this.logger.warn({ fallbackCwd: effectiveProjectRoot, currentCwd: process.cwd() }, '[FrontendServer] setupExpressMiddleware: projectRoot not available, falling back to process.cwd() for static path.');
+        }
+        const staticFilesDirectory = 'frontend/public';
+        const staticPath = resolve(effectiveProjectRoot, staticFilesDirectory); 
 
-        // Basic root route for HTML file
+        this.logger.info({ 
+            path: staticPath, 
+            usedProjectRoot: this.projectRoot, // Log what was originally configured
+            effectiveRootForResolve: effectiveProjectRoot, // Log what was actually used by resolve()
+            currentCwdDuringSetup: process.cwd() // Log CWD at this exact moment
+        }, 'Serving static files for frontend.');
+
+        this.app.use(express.static(staticPath));
+
         this.app.get('/', (req, res) => {
-            res.sendFile(resolve(staticPath, 'index.html'));
+            const indexPath = resolve(staticPath, 'index.html');
+            this.logger.debug({ requestedPath: req.path, servingIndexPath: indexPath, staticPathUsed: staticPath }, "Serving index.html for / route");
+            res.sendFile(indexPath, (err) => {
+                if (err) {
+                    this.logger.error({ errSendFile: err, pathTried: indexPath }, "Error sending index.html");
+                    // TODO: Consider sending a more graceful error response to the client
+                    // For now, Express default error handling will take over.
+                }
+            });
         });
     }
 
@@ -283,30 +331,63 @@ export class FrontendServer {
 
         // New endpoint for ChatTab to send requests to dynamic agents
         const chatWithAgentHandler: RequestHandler = async (req, res, next) => {
-            const { agentMethod, params } = req.body as { agentMethod: string; params: { query: string; context?: any } };
-            this.logger.info({ agentMethod, params }, '[FrontendServer] Received /api/chat-with-agent request.');
+            this.logger.info({ requestBody: req.body, requestHeaders: req.headers }, '[FrontendServer] /api/chat-with-agent RAW request body and headers.');
 
-            if (!this.mcpRequester) {
-                this.logger.error('[FrontendServer] McpRequester not available for /api/chat-with-agent.');
-                res.status(503).json({ error: 'MCP Requester not available. Gateway might still be initializing.' });
-                return;
-            }
-            if (!agentMethod || !params || typeof params.query !== 'string') {
-                 res.status(400).json({ error: 'Invalid request: agentMethod and params.query are required.' });
+            const body = req.body as { agentModelString: string; params: { query: string; context?: any } };
+            const agentModelStringFromRequest = body?.agentModelString;
+            const params = body?.params;
+            
+            this.logger.info({ agentModelString: agentModelStringFromRequest, paramsFromParse: params, typeOfBody: typeof req.body }, '[FrontendServer] Parsed fields from /api/chat-with-agent request.');
+
+            if (!agentModelStringFromRequest || !params || typeof params.query !== 'string') {
+                 this.logger.warn({
+                    isAgentModelStringMissing: !agentModelStringFromRequest,
+                    isParamsMissing: !params,
+                    isParamsQueryNotString: params ? typeof params.query !== 'string' : 'params_is_missing',
+                    receivedAgentModelString: agentModelStringFromRequest,
+                    receivedParams: params
+                 }, '[FrontendServer] Invalid /api/chat-with-agent request, sending 400.');
+                 res.status(400).json({ error: 'Invalid request: agentModelString and params.query are required.' });
                  return;
             }
 
-            try {
-                const result = await this.mcpRequester(agentMethod, params);
-                this.logger.info({ agentMethod, result }, '[FrontendServer] Response from internal MCP request for agent chat.');
-                res.json(result);
-            } catch (error: any) {
-                this.logger.error({ err: error, agentMethod }, '[FrontendServer] Error calling agent via mcpRequester.');
-                res.status(500).json({ 
-                    error: 'Failed to call agent', 
-                    message: error.message, 
-                    details: error.data 
-                });
+            // No longer need to check agentMethod.startsWith('agentify/agent_') here, 
+            // as we assume if llmOrchestrator is present, it can handle the agentModelString directly.
+            if (this.llmOrchestrator) {
+                try {
+                    this.logger.info({ modelToCall: agentModelStringFromRequest, query: params.query }, '[FrontendServer] Calling llmOrchestrator.chatWithAgent directly.');
+                    // Pass the agentModelStringFromRequest (e.g., "OpenAI/gpt-4.1") directly
+                    const result = await this.llmOrchestrator.chatWithAgent(agentModelStringFromRequest, params.query, params.context);
+                    this.logger.info({ agentModelStringFromRequest, result }, '[FrontendServer] Response from direct llmOrchestrator.chatWithAgent call.');
+                    res.json(result);
+                } catch (error: any) {
+                    this.logger.error({ err: error, agentModelString: agentModelStringFromRequest }, '[FrontendServer] Error calling llmOrchestrator.chatWithAgent directly.');
+                    res.status(500).json({ 
+                        error: 'Failed to call agent via LLM orchestrator', 
+                        message: error.message, 
+                        details: error.data || (error instanceof Error ? error.stack : undefined) 
+                    });
+                }
+            } else if (this.mcpRequester) { 
+                // Fallback to mcpRequester if llmOrchestrator is somehow not available.
+                // This path might be less used now for chat but kept for robustness or other agent-like calls.
+                // Note: mcpRequester expects an MCP method, so agentModelStringFromRequest might not be suitable directly.
+                // This fallback path would need agentModelStringFromRequest to be converted back to an MCP method name if it were to work.
+                // For now, this path will likely fail if hit with just "OpenAI/gpt-4.1".
+                this.logger.warn({ agentModelString: agentModelStringFromRequest }, '[FrontendServer] llmOrchestrator not available. Attempting to fall back to mcpRequester. This may not work as expected for direct agent strings.');
+                try {
+                    // Construct the MCP method name from agentModelString if necessary for mcpRequester
+                    const mcpMethodForFallback = `agentify/agent_${agentModelStringFromRequest.replace(/\//g, '_')}`;
+                    const result = await this.mcpRequester(mcpMethodForFallback, params);
+                    this.logger.info({ mcpMethodForFallback, result }, '[FrontendServer] Response from mcpRequester fallback.');
+                    res.json(result);
+                } catch (error: any) {
+                    this.logger.error({ err: error, agentModelString: agentModelStringFromRequest }, '[FrontendServer] Error calling agent via mcpRequester fallback.');
+                    res.status(500).json({ error: 'Failed to call agent via mcpRequester fallback', message: error.message, details: error.data });
+                }
+            } else {
+                this.logger.error('[FrontendServer] No llmOrchestrator or mcpRequester available for /api/chat-with-agent.');
+                res.status(503).json({ error: 'Gateway not fully configured to handle agent chat.' });
             }
         };
         this.app.post('/api/chat-with-agent', express.json(), chatWithAgentHandler);

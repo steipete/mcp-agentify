@@ -162,7 +162,7 @@ describe('Gateway Integration Tests', { timeout: INTEGRATION_TEST_TIMEOUT }, () 
         expect(gatewayProcess?.pid).toBeGreaterThan(0);
         expect(clientConnection).toBeDefined();
     });
-
+    
     describe('Simple Ping Request', () => {
         it('should respond to ping with pong', async () => {
             if (!clientConnection) throw new Error('Client connection not available');

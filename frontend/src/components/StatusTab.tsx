@@ -19,10 +19,13 @@ interface ConfigData extends Partial<GatewayOptions> {
     FRONTEND_PORT?: number;
 }
 
+type OpenAIKeyStatus = 'Untested' | 'Valid' | 'Invalid' | 'Testing...' | 'Error';
+
 export function StatusTab() {
     const [statusData, setStatusData] = useState<StatusData | null>(null);
     const [configData, setConfigData] = useState<ConfigData | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [openAIKeyStatus, setOpenAIKeyStatus] = useState<OpenAIKeyStatus>('Untested');
 
     useEffect(() => {
         // Fetch Status
@@ -42,6 +45,34 @@ export function StatusTab() {
                 console.error('Error fetching current config:', err);
                 setError(prev => prev ? `${prev}\nError fetching current config: ${err.message}` : `Error fetching current config: ${err.message}`);
             });
+
+        // Test OpenAI Key
+        setOpenAIKeyStatus('Testing...');
+        fetch('/api/test-openai')
+            .then(res => {
+                if (!res.ok) {
+                    // Try to get a message from the body, then fallback to statusText
+                    return res.json().then(errData => {
+                        throw new Error(errData.message || `API error: ${res.status} ${res.statusText}`);
+                    }).catch(() => {
+                        throw new Error(`API error: ${res.status} ${res.statusText} (No JSON body)`);
+                    });
+                }
+                return res.json();
+            })
+            .then(data => {
+                if (data.isValid) {
+                    setOpenAIKeyStatus('Valid');
+                } else {
+                    setOpenAIKeyStatus('Invalid');
+                }
+            })
+            .catch(err => {
+                console.error('Error testing OpenAI key:', err);
+                setOpenAIKeyStatus('Error');
+                // Optionally append this error to the main error state, or handle separately
+                // setError(prev => prev ? `${prev}\nOpenAI Key Test Error: ${err.message}` : `OpenAI Key Test Error: ${err.message}`);
+            });
     }, []);
 
     if (error) {
@@ -57,6 +88,7 @@ export function StatusTab() {
                         <ul>
                             <li><strong>Status:</strong> {statusData.status || 'N/A'}</li>
                             <li><strong>Uptime:</strong> {statusData.uptime?.toFixed(2) || 'N/A'}s</li>
+                            <li><strong>OpenAI Key:</strong> <span class={`status-${openAIKeyStatus.toLowerCase().replace(/\.\.\./, '')}`}>{openAIKeyStatus}</span></li>
                         </ul>
                         <h3>Backends:</h3>
                         {statusData.backends && statusData.backends.length > 0 ? (
