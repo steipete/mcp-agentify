@@ -19,7 +19,7 @@ AI-Powered MCP Gateway for Tool Orchestration
 - **Dynamic Backend Management:** Configure backend MCP servers (like `@modelcontextprotocol/server-filesystem`, `@browserbasehq/mcp-browserbase`) via `initializationOptions`.
 - **Simplified Client Logic:** Centralizes tool selection and MCP call formulation.
 - **Stdio Communication:** Designed for easy integration with IDEs and other tools via standard I/O.
-- **Optional Debug UI:** (Planned for future, see Task 8) For observing logs and traces.
+- **Optional Debug UI:** For observing logs, traces, and status.
 
 ## Installation
 
@@ -37,54 +37,36 @@ npx mcp-agentify
 
 ## Configuration
 
-`mcp-agentify` requires configuration for its operation, primarily the OpenAI API key and backend MCP server definitions. Configuration can be provided via a `.env` file (for environment variables) and/or through the `initializationOptions` during the MCP `initialize` handshake when an MCP client connects.
+`mcp-agentify` is configured through a combination of environment variables (often set via a `.env` file for local development or an `env` block in an IDE's server configuration) and `initializationOptions` provided by the connecting MCP client during the `initialize` handshake.
 
-**Priority of Settings:**
-1.  **Environment Variables (`.env` or shell):** Settings like `OPENAI_API_KEY`, `LOG_LEVEL`, and `DEBUG_PORT` read from the environment take the highest precedence and are used for pre-initialization tasks like starting the debug web server.
-2.  **`initializationOptions` from Client:** Settings provided by the connecting MCP client (IDE) are merged. For `OPENAI_API_KEY`, `LOG_LEVEL`, and `DEBUG_PORT`, the environment variable values will still be used if present; client options serve as a fallback or can specify other settings like `backends`.
-3.  **Default Values:** If a setting is not found in environment variables or client options, internal defaults are used (e.g., `logLevel` defaults to 'info').
+**Priority of Core Settings (for `mcp-agentify` itself):**
+1.  **Environment Variables:** `OPENAI_API_KEY`, `LOG_LEVEL`, `DEBUG_PORT` set in `mcp-agentify`'s own execution environment (e.g., from `.env` or IDE's `env` block for the server process) take highest precedence. This allows the Debug Web Server to start immediately.
+2.  **`initializationOptions` from Client:** These same keys can be provided by the client as fallbacks if not set in the environment.
+3.  **Internal Defaults:** (e.g., `logLevel` defaults to 'info').
 
-### 1. Environment Variables (`.env` file)
+### 1. Environment Variables (`.env` file or IDE `env` block)
 
-For local development or when running the gateway directly, create a `.env` file in the project root. This is the **recommended way** to set `OPENAI_API_KEY`, `LOG_LEVEL`, and `DEBUG_PORT` for `mcp-agentify` itself, especially for enabling the Debug UI immediately on startup.
+This is the **recommended way** to set `OPENAI_API_KEY`, `LOG_LEVEL`, and `DEBUG_PORT` for `mcp-agentify`'s own operation.
 
-**Example `.env` file:**
+**Example `.env` file (for local `scripts/dev.sh` or `npm run dev`):**
 ```env
-# Required for LLM orchestration. mcp-agentify will use this key.
 OPENAI_API_KEY=sk-YourOpenAIKeyHereFromDotEnv
-
-# Optional: Default log level for the gateway.
-# Can be one of: trace, debug, info, warn, error, fatal, silent. Defaults to 'info'.
 LOG_LEVEL=debug
-
-# Optional: Port to enable the Debug Web UI.
-# If set, the Debug UI will be accessible at http://localhost:YOUR_PORT immediately on start.
 DEBUG_PORT=3030
-
-# Optional: API key for a specific backend, if that backend expects its key from an env var.
-# This would be configured in the backend's own `env` block within mcp-agentify's `backends` config (see below),
-# OR set globally if the backend reads it from the main process environment.
-# Example: BROWSERBASE_API_KEY_FOR_BACKEND_PROCESS=bb_api_YourBrowserbaseKeyHere
 ```
-*   `OPENAI_API_KEY`: Essential for the LLM orchestrator. Sourced primarily from here.
-*   `LOG_LEVEL`: Controls gateway log verbosity. Sourced primarily from here.
-*   `DEBUG_PORT`: Enables and sets the port for the Debug Web UI, starting it immediately. Sourced primarily from here.
+
+When configuring `mcp-agentify` in an IDE, you'll typically have a way to specify environment variables for the server process. This is where these should go.
 
 ### 2. MCP `initialize` Request (`initializationOptions`)
 
-The client IDE (e.g., Cursor, Windsurf) provides dynamic configuration through the `initializationOptions` parameter of the MCP `initialize` request. This is primarily used for defining `backends`.
+The connecting client (IDE) sends `initializationOptions`. This is **primarily used to define the `backends`** that `mcp-agentify` will orchestrate.
 
-**Note on `OPENAI_API_KEY`, `LOG_LEVEL`, `DEBUG_PORT` in `initializationOptions`:**
-While `mcp-agentify` *can* technically accept these in `initializationOptions` (as a fallback if not set in the environment), the recommended approach for configuring `mcp-agentify`'s own API key, log level, and debug port is via environment variables (e.g., using a `.env` file or an `env` block in your IDE's MCP server definition for `mcp-agentify`, which sets environment variables for the spawned process). This ensures the debug server can start immediately.
-
-**Example `initializationOptions` focusing on `backends` (client-provided):**
+**Example `initializationOptions` (JSON sent by client):**
 ```json
 {
-  // Recommended: Set logLevel, OPENAI_API_KEY, DEBUG_PORT via mcp-agentify's environment
-  // "logLevel": "trace", // Can be set here, but env var takes precedence
-  // "OPENAI_API_KEY": "sk-ClientProvidedKeyAsFallback", // Can be set here, but env var takes precedence
-  // "DEBUG_PORT": 3001, // Can be set here, but env var takes precedence for early start
-
+  "logLevel": "trace",
+  "OPENAI_API_KEY": "sk-ClientProvidedKeyAsFallbackIfEnvNotSet",
+  "DEBUG_PORT": 3001,
   "backends": [
     {
       "id": "filesystem",
@@ -94,10 +76,10 @@ While `mcp-agentify` *can* technically accept these in `initializationOptions` (
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/Users/Shared/Projects", // Example: Map a host directory
-        "/tmp/agentify-work"     // Example: Another mapped directory
+        "/Users/Shared/Projects",
+        "/tmp/agentify-work"
       ],
-      "env": { // Environment variables specifically for THIS backend process
+      "env": {
         "FILESYSTEM_LOG_LEVEL": "debug"
       }
     },
@@ -111,165 +93,124 @@ While `mcp-agentify` *can* technically accept these in `initializationOptions` (
         "@smithery/cli@latest",
         "run",
         "@browserbasehq/mcp-browserbase",
-        "--key", "bb_api_YOUR_KEY_AS_ARG" // Browserbase key passed as command arg
-      ],
-      "env": { // Alternatively, if Browserbase MCP took key from env for its process:
-        // "BROWSERBASE_API_KEY": "bb_api_YOUR_KEY_FOR_BACKEND_ENV"
-      }
+        "--key", "bb_api_YOUR_KEY_AS_ARG_FOR_BROWSERBASE"
+      ]
     }
   ]
 }
 ```
 **Key fields in `initializationOptions`:**
+*   `logLevel`, `OPENAI_API_KEY`, `DEBUG_PORT` (optional fallbacks): As mentioned, `mcp-agentify` prioritizes its own environment variables for these.
 *   `backends` (required, array): Defines the backend MCP servers.
-    *   `id`: Unique identifier (e.g., "filesystem", "mcpBrowserbase").
+    *   `id`: Unique identifier (e.g., "filesystem").
     *   `displayName` (optional): Human-readable name.
-    *   `type`: `\"stdio\"`.
+    *   `type`: Must be `"stdio"`.
     *   `command`: Command to start the backend.
     *   `args` (optional): Arguments for the command.
-    *   `env` (optional): Environment variables *for the spawned backend process*.
+    *   `env` (optional): Environment variables specifically for *this spawned backend process*.
 
 ## How to Run & Configure with an MCP Client (IDE)
 
-This section details how to run `mcp-agentify` and configure your MCP client (like Cursor or Windsurf) to use it. There are several ways to run `mcp-agentify` depending on your needs:
+Your IDE (e.g., Cursor, Windsurf, Claude Desktop) will launch `mcp-agentify`.
 
-### Method 1: Development Mode using `npm run dev` (Recommended for Active Development)
+### Configuring Your IDE
 
-This is the standard way to run `mcp-agentify` while actively developing its features. It uses `nodemon` for hot-reloading and `ts-node` to execute TypeScript source directly.
+You need to tell your IDE:
+1.  **How to start `mcp-agentify`**: This is typically the `command` and `args` (if any), and the `workingDirectory`. For local development, this often points to `bash scripts/dev.sh` or `npm run dev`.
+2.  **Environment Variables for `mcp-agentify`**: Set `OPENAI_API_KEY`, `LOG_LEVEL`, `DEBUG_PORT` here.
+3.  **`initializationOptions`**: Provide the JSON for `backends` and any fallback settings.
 
-1.  **Prerequisites:** Node.js, npm/yarn, Git.
-2.  **Clone & Setup:**
-    ```bash
-    git clone https://github.com/steipete/mcp-agentify.git
-    cd mcp-agentify
-    npm install
-    cp .env.example .env # Edit .env with your OPENAI_API_KEY, etc.
-    ```
-3.  **Run:**
-    ```bash
-    npm run dev
-    ```
-    The gateway starts and listens on `stdio`. Your IDE (MCP Client) should be configured to launch `mcp-agentify` using a command that effectively does this, or by directly executing this if the IDE manages the server lifecycle externally and just needs to connect.
-
-    *To configure your IDE to use this `npm run dev` instance, you would typically point the IDE's MCP server command to `npm` with arguments `run dev` and set the working directory to the `mcp-agentify` project root.*
-
-### Method 2: Running the Compiled Version (Simulating Production)
-
-After building the project, you can run the compiled JavaScript. This is useful for testing the production build or if you prefer not to use `ts-node`.
-
-1.  **Build:** `npm run build`
-2.  **Run:** `node dist/cli.js`
-
-    *Your IDE would be configured to run `node /path/to/mcp-agentify/dist/cli.js`.*
-
-### Method 3: Using a Globally Installed or Linked Version
-
-This method is useful if you've installed `mcp-agentify` globally (e.g., via `npm install -g .` from the cloned repo, or `npm install -g @your-scope/mcp-agentify` once published) or linked it using `npm link`. See the "Local Install and Global Usage (Advanced)" section for details on these steps.
-
-    *Your IDE would be configured to run the command `mcp-agentify` (assuming it's in your PATH) or `npx @your-scope/mcp-agentify` (for the future published package).*
-
-### Method 4: Direct Script Execution via `scripts/dev.sh` (Advanced IDE Integration)
-
-This method is for developers who want to integrate their local, source-code version of `mcp-agentify` directly with an IDE for deep testing, using the `scripts/dev.sh` shell script as the entry point.
-
-1.  **Clone, Install Dependencies, Make Executable:** (As per "Development Mode" steps 1-3, plus `chmod +x scripts/dev.sh`)
-2.  **IDE Configuration:** Your IDE's MCP server configuration would point its `command` directly to the absolute path of this `scripts/dev.sh` script.
-
-    *Example `command` for IDE: `["/absolute/path/to/your/mcp-agentify/scripts/dev.sh"]`*
-
-### Configuring `initializationOptions` and Environment in Your IDE
-
-When setting up `mcp-agentify` in your IDE (e.g., Cursor, Windsurf, Claude Desktop), you'll typically configure:
-1.  The command to start `mcp-agentify` (e.g., `bash /path/to/mcp-agentify/scripts/dev.sh`).
-2.  **Environment variables** for the `mcp-agentify` process itself. This is where you should set `OPENAI_API_KEY`, `LOG_LEVEL`, and `DEBUG_PORT`. Most IDEs provide a way to set environment variables for an MCP server.
-3.  The `initializationOptions` JSON object, primarily for the `backends` array.
-
-**Example IDE Configuration Structure (Conceptual - syntax varies by IDE):**
-
-Imagine your IDE's MCP server configuration for `mcp-agentify` looks something like this:
-
+**Conceptual IDE Configuration Example (e.g., for a `claude_desktop_config.json`-like file):**
 ```json
-// In your IDE's MCP Server configuration file (e.g., claude_desktop_config.json snippet)
 {
-  "mcp-agentify-dev-local": {
-    "name": "mcp-agentify (Dev)",
-    "type": "stdio",
-    "command": "/full/path/to/your/mcp-agentify/scripts/dev.sh",
-    "workingDirectory": "/full/path/to/your/mcp-agentify",
-    "env": { // Environment variables for mcp-agentify process
-      "OPENAI_API_KEY": "sk-YourOpenAIKeyFromIDESettings",
-      "LOG_LEVEL": "trace",
-      "DEBUG_PORT": "3030" // Ensure this is a string if your IDE sets env vars as strings
-    },
-    "initializationOptions": {
-      // `backends` array is the main content here
-      "backends": [
-        {
-          "id": "filesystem",
-          "displayName": "Local Filesystem via Agentify",
-          "type": "stdio",
-          "command": "npx",
-          "args": [
-            "-y",
-            "@modelcontextprotocol/server-filesystem",
-            "${workspaceFolder}",
-            "/tmp/agentify_shared_from_ide"
-          ],
-          "env": {
-            "FILESYSTEM_LOG_LEVEL": "info"
+  "mcpServers": [
+    {
+      "id": "mcp-agentify-dev",
+      "name": "mcp-agentify (Local Dev)",
+      "type": "stdio",
+      "command": "/full/path/to/mcp-agentify/scripts/dev.sh", 
+      "workingDirectory": "/full/path/to/mcp-agentify",
+      "env": {
+        "OPENAI_API_KEY": "sk-YourActualOpenAIKeyFromIDESettings",
+        "LOG_LEVEL": "trace",
+        "DEBUG_PORT": "3030"
+      },
+      "initializationOptions": {
+        "backends": [
+          {
+            "id": "filesystem",
+            "displayName": "Local Filesystem (Agentify)",
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+              "-y",
+              "@modelcontextprotocol/server-filesystem",
+              "${workspaceFolder}" 
+            ],
+            "env": {
+              "FILESYSTEM_LOG_LEVEL": "info"
+            }
+          },
+          {
+            "id": "mcpBrowserbase",
+            "displayName": "Web Browser (Browserbase via Agentify)",
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+              "-y",
+              "@smithery/cli@latest",
+              "run",
+              "@browserbasehq/mcp-browserbase",
+              "--key", "bb_api_YOUR_BROWSERBASE_KEY_FROM_IDE"
+            ]
           }
-        },
-        {
-          "id": "mcpBrowserbase",
-          "displayName": "Web Browser via Agentify (Browserbase)",
-          "type": "stdio",
-          "command": "npx",
-          "args": [
-            "-y",
-            "@smithery/cli@latest",
-            "run",
-            "@browserbasehq/mcp-browserbase",
-            // Example: Key passed as command-line argument to the backend
-            "--key", "bb_api_YOUR_BROWSERBASE_KEY_FROM_IDE_CONFIG"
-          ]
-          // If Browserbase backend needed its key from *its own environment*, you'd use:
-          // "env": { "BROWSERBASE_API_KEY": "bb_api_YOUR_KEY" }
-        }
-        // Add other backend configurations here
-      ]
-      // It's fine to also have these as fallbacks in initializationOptions,
-      // but mcp-agentify will prioritize the values from its own environment.
-      // "logLevel": "debug", 
-      // "DEBUG_PORT": 3001, 
-      // "OPENAI_API_KEY": "sk-FallbackKey" 
+        ],
+        "OPENAI_API_KEY": "sk-FallbackOpenAIKeyIfEnvNotSetByIDE",
+        "LOG_LEVEL": "debug",
+        "DEBUG_PORT": 3001
+      }
     }
-  }
+    // ... other MCP server configurations ...
+  ]
 }
 ```
-
 **Key Points for IDE Configuration:**
-*   **Prioritize `env` block for `mcp-agentify`'s core settings:** Use your IDE's mechanism to set `OPENAI_API_KEY`, `LOG_LEVEL`, and `DEBUG_PORT` as environment variables for the `mcp-agentify` process. This ensures the debug UI starts immediately and logging is configured early.
-*   **Use `initializationOptions` for `backends`:** This is the primary place to define the list of backend services `mcp-agentify` will manage.
-*   Placeholders like `${workspaceFolder}` are often supported by IDEs.
-*   Manage API keys securely.
+*   The IDE's `env` block for the `mcp-agentify` server is crucial for setting its core operational parameters like `OPENAI_API_KEY` and `DEBUG_PORT` (for immediate debug UI).
+*   `initializationOptions` is mainly for defining the `backends` array.
+*   Use placeholders like `${workspaceFolder}` if your IDE supports them.
+
+**Local Development Startup Methods (referenced by IDE `command`):**
+
+*   **`bash scripts/dev.sh`**:
+    *   Recommended for IDEs.
+    *   Uses `nodemon` and `ts-node`.
+    *   Picks up `.env` from `mcp-agentify` project root for `OPENAI_API_KEY`, `LOG_LEVEL`, `DEBUG_PORT`.
+    *   The IDE's `env` block settings (see example above) would override these if the IDE sets environment variables when launching the script.
+*   **`npm run dev`**:
+    *   Similar to `bash scripts/dev.sh`.
+    *   Also uses `nodemon` and `ts-node`.
+*   **`node dist/cli.js`** (after `npm run build`):
+    *   Runs compiled code.
+    *   Also respects `.env` and environment variables set by the IDE.
 
 ## Debug Web UI
 
-`mcp-agentify` includes an optional Debug Web UI for observing operations, logs, and traces.
+`mcp-agentify` includes an optional Debug Web UI.
 
 ### Enabling the Debug UI
 
-Set the `DEBUG_PORT` environment variable for the `mcp-agentify` process (e.g., in your `.env` file or IDE's server configuration `env` block):
-```env
-DEBUG_PORT=3030 # Or your desired port
-```
-The Debug UI will start immediately when `mcp-agentify` launches.
+Set the `DEBUG_PORT` environment variable for `mcp-agentify`. This is best done via:
+1.  A `.env` file in the `mcp-agentify` project root when running locally:
+    ```env
+    DEBUG_PORT=3030
+    ```
+2.  The `env` block in your IDE's server configuration for `mcp-agentify`.
 
-If `DEBUG_PORT` is not set via an environment variable, it can alternatively be provided by a client in `initializationOptions`, but in this case, the debug server will only start *after* the MCP `initialize` handshake completes. **Using the environment variable is recommended for earlier access during development.**
+The Debug UI will start immediately when `mcp-agentify` launches if `DEBUG_PORT` is set in its environment. If provided only as a fallback in `initializationOptions` by a client, it will start after the MCP handshake.
 
 ### Accessing the Debug UI
 
-Once `mcp-agentify` is running and the Debug UI is enabled (e.g., `DEBUG_PORT=3030`), open your web browser to:
+Once `mcp-agentify` is running and the Debug UI is enabled (e.g., `DEBUG_PORT=3030` in its environment), open:
 `http://localhost:3030`
 
 ### Features
@@ -379,7 +320,7 @@ When running a globally installed or linked `mcp-agentify`, it will look for a `
     ```env
     OPENAI_API_KEY=your_openai_api_key_here
     LOG_LEVEL=debug
-    # DEBUG_PORT=3001
+    DEBUG_PORT=3030
     ```
 5.  Run in development mode (with hot reloading):
     ```bash
