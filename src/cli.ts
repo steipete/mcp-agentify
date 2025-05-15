@@ -2,6 +2,10 @@
 // src/cli.ts
 import 'dotenv/config'; // Load .env file at the very top
 
+// Earliest possible point to check raw environment variable
+console.error(`[CLI PRE-INIT] Raw process.env.LOG_LEVEL: ${process.env.LOG_LEVEL}`);
+console.error(`[CLI PRE-INIT] Raw process.env.DEBUG_PORT: ${process.env.DEBUG_PORT}`);
+
 import { startAgentifyServer } from './server';
 import { initializeLogger, getLogger } from './logger';
 import type { PinoLogLevel } from './logger';
@@ -32,6 +36,22 @@ async function main() {
     // For now, pass it if present in env, to make it available to the merge logic in onInitialize.
     if (process.env.OPENAI_API_KEY) {
         initialCliOptions.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    }
+
+    // Read and parse AGENTS environment variable (comma-separated Vendor/ModelName)
+    if (process.env.AGENTS) {
+        try {
+            // Split by comma, then trim whitespace from each part. Filter out any empty strings that might result.
+            const parsedAgents = process.env.AGENTS.split(',').map(agent => agent.trim()).filter(agent => agent.length > 0);
+            if (parsedAgents.length > 0 && parsedAgents.every(item => typeof item === 'string' && item.includes('/'))) {
+                initialCliOptions.gptAgents = parsedAgents; // Keep storing in gptAgents for now, type is string[]
+                cliLogger.info({ gptAgents: parsedAgents }, 'AGENTS environment variable processed.');
+            } else {
+                cliLogger.warn('AGENTS environment variable is not a valid comma-separated list of Vendor/ModelName strings (e.g., OpenAI/gpt-4.1). Ignoring.');
+            }
+        } catch (error) {
+            cliLogger.warn({ err: error, rawValue: process.env.AGENTS }, 'Error processing AGENTS environment variable. Ensure it is a comma-separated string. Ignoring.');
+        }
     }
 
     cliLogger.debug({ initialCliOptionsFromEnv: initialCliOptions }, 'Initial CLI options prepared from environment.');

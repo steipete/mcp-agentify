@@ -53,6 +53,11 @@ This is the **recommended way** to set `OPENAI_API_KEY`, `LOG_LEVEL`, and `DEBUG
 OPENAI_API_KEY=sk-YourOpenAIKeyHereFromDotEnv
 LOG_LEVEL=debug
 DEBUG_PORT=3030
+
+# Optional: Define dynamic agents. Comma-separated list of "Vendor/ModelName".
+# Example: AGENTS="OpenAI/gpt-4.1,OpenAI/o3,Anthropic/claude-3-opus"
+# This will expose MCP methods like: agentify/agent_OpenAI_gpt_4_1, agentify/agent_OpenAI_o3, etc.
+AGENTS="OpenAI/gpt-4.1,OpenAI/o3"
 ```
 
 When configuring `mcp-agentify` in an IDE, you'll typically have a way to specify environment variables for the server process. This is where these should go.
@@ -341,3 +346,18 @@ npm run test:coverage
 ## License
 
 [MIT](LICENSE)
+
+### Dynamic Agent Methods via `AGENTS` Environment Variable
+
+`mcp-agentify` can expose direct agent interaction methods on the fly based on the `AGENTS` environment variable. This is useful for quickly testing different models or providing direct access to specific LLM configurations without defining them as full backend tools.
+
+-   Set the `AGENTS` environment variable as a comma-separated string of `"Vendor/ModelName"` pairs.
+    -   **Format:** `AGENTS="Vendor1/ModelNameA,Vendor2/ModelNameB"`
+    -   **Example:** `AGENTS="OpenAI/gpt-4.1,OpenAI/o3"`
+    -   (Ensure the model names are valid for the specified vendor, e.g., as per OpenAI API documentation for `gpt-4.1`, `o3`, etc.)
+-   For each entry, `mcp-agentify` will register an MCP method:
+    -   The `Vendor/ModelName` string is sanitized (non-alphanumerics, including `/`, become `_`).
+    -   The method will be named `agentify/agent_<sanitized_Vendor_ModelName>`.
+    -   **Example:** `AGENTS="OpenAI/gpt-4.1"` creates `agentify/agent_OpenAI_gpt_4_1`.
+-   These methods currently accept a `{ query: string, context?: OrchestrationContext }` payload and return a placeholder response.
+    Full LLM interaction logic for these dynamic agents will be implemented in the future.

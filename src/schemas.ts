@@ -43,6 +43,7 @@ export type GatewayOptions = {
     OPENAI_API_KEY?: string; // From env, required for operation
     backends: BackendConfig[]; // From client init options
     DEBUG_PORT?: number | null; // From env, with internal default
+    gptAgents?: string[]; // For dynamically exposed agent methods
 };
 
 export const AgentifyOrchestrateTaskParamsSchema = z.object({

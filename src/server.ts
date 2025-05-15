@@ -17,8 +17,18 @@ import { initializeLogger, getLogger, type PinoLogLevel } from './logger';
 import { BackendManager } from './backendManager';
 import { LLMOrchestratorService } from './llmOrchestrator';
 import { DebugWebServer } from './debugWebServer';
-import type { GatewayOptions, AgentifyOrchestrateTaskParams, Plan, McpTraceEntry } from './interfaces';
-import { GatewayClientInitOptionsSchema, type GatewayClientInitOptions, AgentifyOrchestrateTaskParamsSchema } from './schemas';
+import type {
+    GatewayOptions,
+    AgentifyOrchestrateTaskParams,
+    Plan,
+    McpTraceEntry,
+    OrchestrationContext,
+} from './interfaces';
+import {
+    GatewayClientInitOptionsSchema,
+    type GatewayClientInitOptions,
+    AgentifyOrchestrateTaskParamsSchema,
+} from './schemas';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -118,6 +128,32 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
         tempConsoleLogger as any,
     );
 
+    // Dynamically register agent methods based on AGENTS from environment
+    if (internalGatewayOptions.gptAgents && internalGatewayOptions.gptAgents.length > 0) {
+        pinoLogger.info({ agents: internalGatewayOptions.gptAgents }, '[GATEWAY SERVER] Registering dynamic agent methods from AGENTS env var...');
+        for (const fullAgentString of internalGatewayOptions.gptAgents) { // e.g., "OpenAI/gpt-4.1"
+            // Sanitize the full string for the method name: replace non-alphanumeric (except /) with _
+            // Then replace / with _ to ensure it's a single segment after agent_
+            const sanitizedMethodPart = fullAgentString.replace(/[^a-zA-Z0-9_\/]/g, '_').replace(/\//g, '_');
+            const methodName = `agentify/agent_${sanitizedMethodPart}`;
+            
+            pinoLogger.info(`[GATEWAY SERVER] Registering method: ${methodName} for agent: ${fullAgentString}`);
+
+            connection.onRequest(methodName, async (params: { query: string; context?: OrchestrationContext }) => {
+                pinoLogger.info({ method: methodName, agent: fullAgentString, params }, `Dynamic agent method ${methodName} called.`);
+                if (!llmOrchestrator) {
+                    pinoLogger.error({ method: methodName }, 'LLMOrchestrator not available for dynamic agent call.');
+                    throw new ResponseError(ErrorCodes.InternalError, 'LLMOrchestrator not initialized');
+                }
+                // TODO: Future - llmOrchestrator.invokeAgent(fullAgentString, params.query, params.context);
+                return {
+                    message: `Agent '${fullAgentString}' received query: "${params.query}". Context: ${JSON.stringify(params.context || {})}`,
+                    note: "This is a placeholder response. Full LLM interaction for dynamic agents is not yet implemented."
+                };
+            });
+        }
+    }
+
     connection.onClose(() => {
         getLogger().info('Client connection closed.');
         if (backendManager) {
@@ -203,7 +239,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     const errorMsg =
                         'OpenAI API Key is required for mcp-agentify to function and was not found in its environment.';
                     pinoLogger.error(errorMsg);
-                    throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { 
+                    throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, {
                         missingKey: 'OPENAI_API_KEY',
                     });
                 }

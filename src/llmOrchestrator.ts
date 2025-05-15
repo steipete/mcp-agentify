@@ -1,14 +1,7 @@
 import OpenAI, { APIError } from 'openai';
 import type { Logger as PinoLoggerBase } from 'pino';
 import { PinoLogLevel } from './logger';
-import type {
-    BackendConfig,
-    OpenAITool,
-    OpenAIFunctionParameters,
-    BackendStdioConfig,
-    OrchestrationContext,
-    Plan,
-} from './interfaces';
+import type { BackendConfig, OrchestrationContext, Plan, BackendStdioConfig } from './interfaces';
 import { LLMGeneratedArgumentsSchema, LLMPlanSchema } from './schemas';
 // OrchestrationContext, Plan, LLMGeneratedArgumentsSchema, LLMPlanSchema will be used in later subtasks.
 
@@ -142,12 +135,11 @@ export class LLMOrchestratorService {
             { role: 'user', content: userMessageContent },
         ];
 
-        // Corrected type path for ChatCompletionCreateParams
         const requestPayload: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
             model: 'gpt-4.1',
             messages: messages,
             tools: this.availableToolsForLLM,
-            tool_choice: 'auto' as const, // Ensure tool_choice is specifically "auto" or an object
+            tool_choice: 'auto' as const,
         };
 
         this.logger.trace({ requestPayload }, 'Sending request to OpenAI API for tool call generation.');
