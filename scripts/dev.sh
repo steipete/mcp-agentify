@@ -20,4 +20,4 @@ export FRONTEND_PORT=${FRONTEND_PORT:-3030}
 
 # If the VSCODE_INSPECTOR_OPTIONS environment variable is set (e.g., by VS Code's JavaScript debugger),
 
-NODE_ENV=development npx tsx ./src/cli.ts 
+AGENTS="OpenAI/gpt-4.1, OpenAI/o3" NODE_ENV=development npx --yes --quiet tsx ./src/cli.ts 

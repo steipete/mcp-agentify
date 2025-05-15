@@ -118,6 +118,102 @@ export class LLMOrchestratorService {
         return this.availableToolsForLLM;
     }
 
+    public async chatWithAgent(
+        agentModelString: string, // Expected format: "Vendor/ModelName", e.g., "OpenAI/gpt-4.1"
+        userQuery: string,
+        context?: OrchestrationContext | null | undefined
+    ): Promise<{ message: string; rawResponse?: OpenAI.Chat.Completions.ChatCompletion; [key: string]: any }> {
+        this.logger.info({ agentModelStringReceived: agentModelString, userQuery, context }, 'Initiating direct chat with agent.');
+
+        let modelToUse = 'gpt-4.1'; // Default model if parsing fails
+        const parts = agentModelString.split('/', 2);
+        let vendor = 'openai'; // Default vendor
+        let modelNameFromInput = agentModelString; // Default if no slash
+
+        if (parts.length === 2) {
+            vendor = parts[0].toLowerCase();
+            modelNameFromInput = parts[1];
+        } else {
+            this.logger.warn({ agentModelString }, `No vendor prefix found in agentModelString. Assuming default vendor 'openai' and model '${modelNameFromInput}'.`);
+        }
+
+        if (vendor === 'openai') {
+            modelToUse = modelNameFromInput;
+            this.logger.info(`Using OpenAI model: ${modelToUse} for agent chat.`);
+        } else {
+            // For non-OpenAI vendors, we'll still try to use modelNameFromInput with the OpenAI client.
+            // This relies on the OpenAI API key/endpoint being able to handle other models (e.g., OpenRouter).
+            modelToUse = modelNameFromInput; // Or potentially the full agentModelString if that's what an OpenRouter-like endpoint expects.
+            this.logger.warn(
+                { agentModelString, resolvedVendor: vendor, modelToAttempt: modelToUse },
+                `Vendor "${vendor}" is not natively "openai". Attempting to use model "${modelToUse}" with the current OpenAI client. Success depends on API key compatibility (e.g., OpenRouter).`
+            );
+        }
+
+        if (!modelToUse || modelToUse.trim() === '') {
+            const errMsg = `After parsing, modelToUse is empty for agentModelString: "${agentModelString}". Falling back to default 'gpt-4.1'.`;
+            this.logger.error({ agentModelString }, errMsg);
+            modelToUse = 'gpt-4.1';
+        }
+
+        const systemPrompt = "You are a helpful AI assistant. Respond directly to the user's query.";
+        let userMessageContent = `User query: "${userQuery}"`;
+        if (context) {
+            userMessageContent += `\n\nRelevant Context:\n${JSON.stringify(context, null, 2)}`;
+        }
+        
+        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessageContent },
+        ];
+
+        const requestPayload: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
+            model: modelToUse,
+            messages: messages,
+        };
+
+        this.logger.trace({ requestPayload }, 'Sending request to OpenAI API for agent chat.');
+
+        try {
+            const response = await this.openai.chat.completions.create(requestPayload);
+            this.logger.trace({ response }, 'Received response from OpenAI API for agent chat.');
+
+            const assistantMessage = response.choices[0]?.message?.content;
+
+            if (assistantMessage === null || assistantMessage === undefined) { // Check for null or undefined explicitly
+                this.logger.warn({ choice: response.choices[0] }, 'LLM did not return a message content.');
+                // Still return a structured response, but indicate no message
+                return { message: '[No message content received from LLM]', rawResponse: response };
+            }
+
+            this.logger.info('LLM returned a message for agent chat.');
+            return { message: assistantMessage, rawResponse: response };
+        } catch (apiError: unknown) {
+            let errorMessageForClient = 'An unexpected error occurred while communicating with the AI agent.';
+            if (apiError instanceof APIError) {
+                this.logger.error(
+                    {
+                        errName: apiError.name,
+                        status: apiError.status,
+                        errMessage: apiError.message, // OpenAI specific message
+                        errHeaders: apiError.headers,
+                        modelUsed: modelToUse,
+                    },
+                    'OpenAI API Error during agent chat.',
+                );
+                errorMessageForClient = `OpenAI API Error: ${apiError.message || 'Failed to get response from agent.'}`;
+            } else if (apiError instanceof Error) {
+                this.logger.error({ errMessage: apiError.message, errStack: apiError.stack, modelUsed: modelToUse }, 'Generic error during agent chat.');
+                errorMessageForClient = `Error during agent chat: ${apiError.message}`;
+            } else {
+                this.logger.error({ errorObject: apiError, modelUsed: modelToUse }, 'Unknown error object during agent chat.');
+            }
+            // Instead of returning an error-like object, throw an error that the server can catch
+            // and turn into a ResponseError.
+            throw new Error(errorMessageForClient); 
+        }
+    }
+
     public async orchestrate(query: string, context: OrchestrationContext | null | undefined): Promise<Plan | null> {
         this.logger.info({ query, context }, 'Orchestrating task based on user query and context.');
 

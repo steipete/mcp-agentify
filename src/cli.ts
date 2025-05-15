@@ -1,8 +1,17 @@
 #!/usr/bin/env node
 // src/cli.ts
+
+// VERY VERY EARLY LOGS - Before any imports
+const rawAgentsBeforeDotEnv = process.env.AGENTS;
+const rawNodeEnvBeforeDotEnv = process.env.NODE_ENV;
+console.error(`[SUPER EARLY CLI] process.env.AGENTS (before dotenv): ${rawAgentsBeforeDotEnv}`);
+console.error(`[SUPER EARLY CLI] process.env.NODE_ENV (before dotenv): ${rawNodeEnvBeforeDotEnv}`);
+console.error(`[SUPER EARLY CLI] CWD: ${process.cwd()}`);
+console.error(`[SUPER EARLY CLI] Argv: ${process.argv.join(' ')}`);
+
 import 'dotenv/config'; // Load .env file at the very top
 
-// Earliest possible point to check raw environment variable
+// Earliest possible point to check raw environment variable AFTER dotenv
 console.error(`[CLI PRE-INIT] Script CWD: ${process.cwd()}`);
 // Log both cases for LOG_LEVEL for clarity during this debugging phase
 console.error(`[CLI PRE-INIT] Raw process.env.LOG_LEVEL (uppercase): ${process.env.LOG_LEVEL}`); 
@@ -19,7 +28,9 @@ if (apiKey && apiKey.length > 10) { // Ensure key is long enough to get first 5 
 } else {
     console.error('[CLI PRE-INIT] Raw process.env.OPENAI_API_KEY: undefined');
 }
-console.error(`[CLI PRE-INIT] Raw process.env.AGENTS: ${process.env.AGENTS}`);
+// Add the after dotenv log for AGENTS and NODE_ENV
+console.error(`[CLI PRE-INIT] Raw process.env.AGENTS (after dotenv): ${process.env.AGENTS}`);
+console.error(`[CLI PRE-INIT] Raw process.env.NODE_ENV (after dotenv): ${process.env.NODE_ENV}`);
 
 import { startAgentifyServer } from './server';
 import { initializeLogger, getLogger } from './logger';
@@ -33,8 +44,10 @@ const cliLogger = initializeLogger({ logLevel: preliminaryLogLevel });
 
 async function main() {
     cliLogger.info('Starting mcp-agentify CLI...');
+    const projectRoot = process.cwd(); // Capture CWD here where it should be correct
+    cliLogger.info({ projectRoot }, 'Captured project root in cli.ts');
 
-    const initialCliOptions: Partial<GatewayOptions> = {};
+    const initialCliOptions: Partial<GatewayOptions> & { projectRoot?: string } = { projectRoot }; // Add projectRoot
     // Prioritize lowercase 'logLevel' from env, then uppercase, then default in server.ts is 'info'
     if (envLogLevelValue) {
         initialCliOptions.logLevel = envLogLevelValue as PinoLogLevel;
