@@ -2,8 +2,11 @@
 // src/cli.ts
 import 'dotenv/config'; // Load .env file at the very top
 
+// Earliest possible point to check raw environment variable
 console.error(`[CLI PRE-INIT] Script CWD: ${process.cwd()}`);
-console.error(`[CLI PRE-INIT] Raw process.env.LOG_LEVEL: ${process.env.LOG_LEVEL}`);
+// Log both cases for LOG_LEVEL for clarity during this debugging phase
+console.error(`[CLI PRE-INIT] Raw  vprocess.env.LOG_LEVEL (uppercase): ${process.env.LOG_LEVEL}`); 
+console.error(`[CLI PRE-INIT] Raw process.env.logLevel (lowercase): ${process.env.logLevel}`); 
 console.error(`[CLI PRE-INIT] Raw process.env.FRONTEND_PORT: ${process.env.FRONTEND_PORT}`);
 const apiKey = process.env.OPENAI_API_KEY;
 if (apiKey) {
@@ -20,17 +23,18 @@ import { initializeLogger, getLogger } from './logger';
 import type { PinoLogLevel } from './logger';
 import type { GatewayOptions } from './interfaces';
 
-// Initialize a basic logger early for CLI messages before full server init
-// The final logger configuration (level, etc.) will be set during the MCP 'initialize' handshake.
-const preliminaryLogLevel = (process.env.LOG_LEVEL as PinoLogLevel) || 'info';
+// Use lowercase 'logLevel' from env to match IDE config, fallback to uppercase, then to 'info'
+const envLogLevelValue = process.env.logLevel || process.env.LOG_LEVEL;
+const preliminaryLogLevel = (envLogLevelValue as PinoLogLevel) || 'info';
 const cliLogger = initializeLogger({ logLevel: preliminaryLogLevel });
 
 async function main() {
     cliLogger.info('Starting mcp-agentify CLI...');
 
     const initialCliOptions: Partial<GatewayOptions> = {};
-    if (process.env.LOG_LEVEL) {
-        initialCliOptions.logLevel = process.env.LOG_LEVEL as PinoLogLevel;
+    // Prioritize lowercase 'logLevel' from env, then uppercase, then default in server.ts is 'info'
+    if (envLogLevelValue) {
+        initialCliOptions.logLevel = envLogLevelValue as PinoLogLevel;
     }
     if (process.env.FRONTEND_PORT) {
         if (process.env.FRONTEND_PORT.toLowerCase() === 'disabled') {
