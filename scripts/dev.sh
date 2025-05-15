@@ -13,7 +13,7 @@ export DEBUG_PORT=${DEBUG_PORT:-3030}
 NODE_ENV=development npx nodemon \
     --watch src \
     --ext ts,json \
-    --exec "npx ts-node ./src/cli.ts" \
+    --exec "npx ts-node --project tsconfig.json ./src/cli.ts" \
     --signal SIGTERM \
     --exitcrash \
     --quiet 
