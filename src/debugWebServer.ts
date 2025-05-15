@@ -6,7 +6,8 @@ import type { Logger as PinoLoggerBase } from 'pino'; // Use base type for gener
 import type { PinoLogLevel } from './logger'; // Import the specific level type
 import { resolve } from 'node:path';
 import type { BackendManager } from './backendManager'; // For future use in API endpoints
-import type { GatewayOptions, LogEntry, McpTraceEntry } from './interfaces'; // For future use in API endpoints, LogEntry, McpTraceEntry
+import type { GatewayOptions, LogEntry, McpTraceEntry } from './interfaces'; // Corrected
+import type { GatewayClientInitOptions } from './schemas'; // Import from schemas
 import { Writable } from 'node:stream'; // Import Writable
 
 // Forward declaration for types used by LogBuffer/TraceBuffer if they are complex
@@ -21,6 +22,9 @@ export class DebugWebServer {
     private logger: PinoLoggerBase<PinoLogLevel>;
     private backendManager?: BackendManager; // Made optional for now
     private gatewayOptions?: GatewayOptions; // Made optional for now
+    private initialEnvConfig?: Partial<GatewayOptions>;
+    private clientSentInitOptions?: GatewayClientInitOptions; // Store the validated client options
+    private finalEffectiveConfig?: GatewayOptions;
 
     // In-memory buffers for logs and traces
     private logBuffer: LogEntry[] = [];
@@ -31,12 +35,17 @@ export class DebugWebServer {
         port: number,
         mainLogger: PinoLoggerBase<PinoLogLevel>,
         backendManager?: BackendManager,
-        gatewayOptions?: GatewayOptions,
+        // This gatewayOptions is the initial config based on ENV or defaults when DWS starts early
+        initialConfig?: Partial<GatewayOptions>, 
     ) {
         this.port = port;
         this.logger = mainLogger.child({ component: 'DebugWebServer' });
         this.backendManager = backendManager;
-        this.gatewayOptions = gatewayOptions ? this.sanitizeConfig(gatewayOptions) : undefined;
+        // Store the initial config (likely from ENV vars if DWS starts early)
+        this.initialEnvConfig = initialConfig ? this.sanitizePartialConfig(initialConfig) : undefined;
+        // this.gatewayOptions was used for /api/config, let's keep it for that specific purpose (showing what DWS *thinks* is current)
+        // For now, let's make this.gatewayOptions be the final effective config when available, or initial if not updated.
+        this.gatewayOptions = initialConfig ? this.sanitizePartialConfig(initialConfig) as GatewayOptions : undefined;
 
         this.app = express();
         this.httpServer = http.createServer(this.app);
@@ -140,6 +149,34 @@ export class DebugWebServer {
         return sanitized;
     }
 
+    private sanitizePartialConfig(config: Partial<GatewayOptions>): Partial<GatewayOptions> {
+        this.logger.debug({configKeys: Object.keys(config)}, 'Sanitizing partial gateway configuration for debug API.');
+        const sanitized: Partial<GatewayOptions> = JSON.parse(JSON.stringify(config)); 
+
+        if (sanitized.OPENAI_API_KEY) {
+            sanitized.OPENAI_API_KEY = '[REDACTED]';
+        }
+        // No backends in initial partial config usually, but if there were, sanitize them.
+        if (sanitized.backends) {
+             sanitized.backends = sanitized.backends.map(backend => {
+                const newBackend = { ...backend };
+                if (newBackend.env) {
+                    const newEnv: Record<string, string> = {};
+                    for (const key in newBackend.env) {
+                        if (key.toUpperCase().includes('KEY') || key.toUpperCase().includes('SECRET') || key.toUpperCase().includes('TOKEN')) {
+                            newEnv[key] = '[REDACTED]';
+                        } else {
+                            newEnv[key] = newBackend.env[key];
+                        }
+                    }
+                    newBackend.env = newEnv;
+                }
+                return newBackend;
+            });
+        }
+        return sanitized;
+    }
+
     private setupExpressMiddleware(): void {
         this.app.use(express.json()); // For parsing application/json in potential POST routes
         // Serve static files from public_debug_ui
@@ -178,15 +215,25 @@ export class DebugWebServer {
         this.app.get('/api/status', statusHandler);
 
         const configHandler: RequestHandler = (req, res) => {
-            this.logger.debug('Request received for /api/config');
+            this.logger.debug('Request received for /api/config (current effective).');
             if (!this.gatewayOptions) {
-                // gatewayOptions is sanitized in constructor. If it was never provided, it's undefined.
-                res.status(404).json({ message: 'Gateway configuration not available or not yet initialized.' });
+                res.status(404).json({ message: 'Current effective gateway configuration not available.' });
                 return;
             }
-            res.json(this.gatewayOptions); // Already sanitized
+            res.json(this.gatewayOptions); 
         };
         this.app.get('/api/config', configHandler);
+
+        // New endpoint for detailed config states
+        const configDetailsHandler: RequestHandler = (req, res) => {
+            this.logger.debug('Request received for /api/config-details.');
+            res.json({
+                initialEnvConfig: this.initialEnvConfig || { note: 'Not set or DWS started post-env phase' },
+                clientSentInitOptions: this.clientSentInitOptions || { note: 'Initialize request not yet received/processed' },
+                finalEffectiveConfig: this.finalEffectiveConfig || { note: 'Final configuration not yet set' }
+            });
+        };
+        this.app.get('/api/config-details', configDetailsHandler);
 
         // Placeholder for /api/logs and /api/traces (Subtask 8.2 continued)
         const logsHandler: RequestHandler = (req, res) => {
@@ -244,6 +291,10 @@ export class DebugWebServer {
         this.httpServer.listen(this.port, () => {
             this.logger.info(`DebugWebServer listening on http://localhost:${this.port}`);
         });
+    }
+
+    public getPort(): number {
+        return this.port;
     }
 
     public stop(): Promise<void> {
@@ -304,5 +355,28 @@ export class DebugWebServer {
     public updateLogger(newLogger: PinoLoggerBase<PinoLogLevel>): void {
         this.logger = newLogger.child({ component: 'DebugWebServer' });
         this.logger.info('Successfully updated internal logger instance.');
+    }
+
+    // Method to receive client-sent initializationOptions (should be the validated & parsed version)
+    public setClientSentInitOptions(options: GatewayClientInitOptions): void {
+        this.logger.debug({ options }, 'DebugWebServer received client-sent initializationOptions.');
+        // Sanitize if it contains sensitive fields directly (though it shouldn't for core config)
+        const sanitizedOptions: GatewayClientInitOptions = JSON.parse(JSON.stringify(options));
+        if (sanitizedOptions.OPENAI_API_KEY) {
+            (sanitizedOptions.OPENAI_API_KEY as any) = '[REDACTED_IN_CLIENT_OPTIONS_DISPLAY]';
+        }
+        // Backends in GatewayClientInitOptions are already BackendConfig[], sanitize them further if needed for display.
+        if (sanitizedOptions.backends) {
+            sanitizedOptions.backends = this.sanitizePartialConfig({ backends: sanitizedOptions.backends }).backends || [];
+        }
+        this.clientSentInitOptions = sanitizedOptions;
+    }
+
+    // Method to receive the final effective merged configuration
+    public setFinalEffectiveConfig(config: GatewayOptions): void {
+        this.logger.debug({ configKeys: Object.keys(config) }, 'DebugWebServer received final effective configuration.');
+        this.finalEffectiveConfig = this.sanitizeConfig(config); // sanitizeConfig expects full GatewayOptions
+        // Update the general this.gatewayOptions for the /api/config endpoint to reflect the latest final config
+        this.gatewayOptions = this.finalEffectiveConfig;
     }
 }

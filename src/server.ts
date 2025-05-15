@@ -17,8 +17,8 @@ import { initializeLogger, getLogger, type PinoLogLevel } from './logger';
 import { BackendManager } from './backendManager';
 import { LLMOrchestratorService } from './llmOrchestrator';
 import { DebugWebServer } from './debugWebServer';
-import type { GatewayOptions, GatewayClientInitOptions, AgentifyOrchestrateTaskParams, Plan, McpTraceEntry } from './interfaces';
-import { GatewayClientInitOptionsSchema, AgentifyOrchestrateTaskParamsSchema } from './schemas';
+import type { GatewayOptions, AgentifyOrchestrateTaskParams, Plan, McpTraceEntry } from './interfaces';
+import { GatewayClientInitOptionsSchema, type GatewayClientInitOptions, AgentifyOrchestrateTaskParamsSchema } from './schemas';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -69,10 +69,12 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
             const debugStreamForPino = debugWebServerInstance?.getLogStream();
             if (debugStreamForPino) {
                 tempPinoLogger = initializeLogger(
-                    { logLevel: envLogLevel }, undefined, debugStreamForPino,
+                    { logLevel: envLogLevel }, undefined, debugStreamForPino
                 );
                 debugWebServerInstance.updateLogger(tempPinoLogger);
-                tempPinoLogger.info('[GATEWAY SERVER PRE-INIT] DebugWebServer started and logger updated with its stream.');
+                tempPinoLogger.info(
+                    '[GATEWAY SERVER PRE-INIT] DebugWebServer started and logger updated with its stream.',
+                );
             }
         } catch (err) {
             tempPinoLogger.error({ err }, '[GATEWAY SERVER PRE-INIT] Failed to start DebugWebServer early.');
@@ -90,14 +92,22 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
     };
 
     if (!internalGatewayOptions.OPENAI_API_KEY) {
-        pinoLogger.fatal('[GATEWAY SERVER] CRITICAL: OPENAI_API_KEY is not set in the environment. mcp-agentify cannot function.');
+        pinoLogger.fatal(
+            '[GATEWAY SERVER] CRITICAL: OPENAI_API_KEY is not set in the environment. mcp-agentify cannot function.',
+        );
         // Allow to connect but orchestrateTask will fail if key is missing.
         // Or: process.exit(1); // More drastic: refuse to start without API key
     }
 
     pinoLogger.info(
-        { configFromEnv: { logLevel: internalGatewayOptions.logLevel, DEBUG_PORT: internalGatewayOptions.DEBUG_PORT, OPENAI_API_KEY: internalGatewayOptions.OPENAI_API_KEY ? '***' : undefined } },
-        '[GATEWAY SERVER] Core configuration initialized from environment/defaults.'
+        {
+            configFromEnv: {
+                logLevel: internalGatewayOptions.logLevel,
+                DEBUG_PORT: internalGatewayOptions.DEBUG_PORT,
+                OPENAI_API_KEY: internalGatewayOptions.OPENAI_API_KEY ? '***' : undefined,
+            },
+        },
+        '[GATEWAY SERVER] Core configuration initialized from environment/defaults.',
     );
 
     // --- END EARLY AND FINAL CORE INITIALIZATION ---
@@ -166,7 +176,10 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
             try {
                 pinoLogger.info({ initParamsReceived: params }, "[GATEWAY SERVER] Received 'initialize' request.");
 
-                pinoLogger.info({ initParamsReceived: params.initializationOptions }, "[GATEWAY SERVER] Received 'initialize' request with client options.");
+                pinoLogger.info(
+                    { initParamsReceived: params.initializationOptions },
+                    "[GATEWAY SERVER] Received 'initialize' request with client options.",
+                );
 
                 // Validate client-provided options, primarily for `backends`
                 const clientOptionsValidation = GatewayClientInitOptionsSchema.safeParse(params.initializationOptions);
@@ -177,32 +190,41 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                         validationErrors: clientOptionsValidation.error.format(),
                     });
                 }
-                const clientProvidedBackends = clientOptionsValidation.data.backends;
+                const clientSentOptions: GatewayClientInitOptions = clientOptionsValidation.data;
+                if (debugWebServerInstance) {
+                    debugWebServerInstance.setClientSentInitOptions(clientSentOptions);
+                }
 
                 // Populate `backends` in the internalGatewayOptions
-                internalGatewayOptions.backends = clientProvidedBackends;
+                internalGatewayOptions.backends = clientSentOptions.backends;
 
                 // OPENAI_API_KEY check again, crucial for operation, should be from ENV already
                 if (!internalGatewayOptions.OPENAI_API_KEY) {
                     const errorMsg =
                         'OpenAI API Key is required for mcp-agentify to function and was not found in its environment.';
                     pinoLogger.error(errorMsg);
-                    throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { missingKey: 'OPENAI_API_KEY' });
+                    throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { 
+                        missingKey: 'OPENAI_API_KEY',
+                    });
                 }
 
                 // Debug Web Server should already be running if DEBUG_PORT was set via ENV or defaulted.
                 // If client *also* sent a DEBUG_PORT in its (now mostly ignored for this) options, log it but take no action if different.
-                if (params.initializationOptions?.DEBUG_PORT && 
-                    params.initializationOptions.DEBUG_PORT !== internalGatewayOptions.DEBUG_PORT) {
+                if (
+                    params.initializationOptions?.DEBUG_PORT &&
+                    params.initializationOptions.DEBUG_PORT !== internalGatewayOptions.DEBUG_PORT
+                ) {
                     pinoLogger.warn(
-                        `[GATEWAY SERVER] Client sent DEBUG_PORT ${params.initializationOptions.DEBUG_PORT}, but gateway is using ${internalGatewayOptions.DEBUG_PORT} (from env/default).`
+                        `[GATEWAY SERVER] Client sent DEBUG_PORT ${params.initializationOptions.DEBUG_PORT}, but gateway is using ${internalGatewayOptions.DEBUG_PORT} (from env/default).`,
                     );
                 }
                 // Same for logLevel
-                if (params.initializationOptions?.logLevel && 
-                    params.initializationOptions.logLevel !== internalGatewayOptions.logLevel) {
+                if (
+                    params.initializationOptions?.logLevel &&
+                    params.initializationOptions.logLevel !== internalGatewayOptions.logLevel
+                ) {
                     pinoLogger.warn(
-                        `[GATEWAY SERVER] Client sent logLevel ${params.initializationOptions.logLevel}, but gateway is using ${internalGatewayOptions.logLevel} (from env/default).`
+                        `[GATEWAY SERVER] Client sent logLevel ${params.initializationOptions.logLevel}, but gateway is using ${internalGatewayOptions.logLevel} (from env/default).`,
                     );
                 }
 
@@ -210,6 +232,10 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     { finalGatewayConfig: { ...internalGatewayOptions, OPENAI_API_KEY: '***' } },
                     '[GATEWAY SERVER] Final gateway configuration assembled.',
                 );
+                if (debugWebServerInstance) {
+                    // Pass the final, fully assembled internal config
+                    debugWebServerInstance.setFinalEffectiveConfig(internalGatewayOptions); 
+                }
 
                 pinoLogger.info('[GATEWAY SERVER] Initializing BackendManager...');
                 backendManager = new BackendManager(pinoLogger);
@@ -231,7 +257,7 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                     llmOrchestrator = new LLMOrchestratorService(
                         internalGatewayOptions.OPENAI_API_KEY, // Definitely use the one from env
                         internalGatewayOptions.backends,
-                        pinoLogger
+                        pinoLogger,
                     );
                     pinoLogger.info('[GATEWAY SERVER] LLMOrchestratorService initialized.');
                 } catch (err: unknown) {
@@ -241,8 +267,11 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                 }
 
                 if (debugWebServerInstance && backendManager) {
+                    // Update DebugWebServer with BackendManager if it has a method to accept it for /api/status
+                    // For now, constructor takes it as optional. If it was started early, it won't have it.
+                    // This is a good place to provide it if a method exists, e.g., debugWebServerInstance.setBackendManager(backendManager);
                     pinoLogger.info(
-                        '[GATEWAY SERVER] DebugWebServer (if running) can now access BackendManager (if needed by its API).',
+                        '[GATEWAY SERVER] DebugWebServer (if running) can now associate with BackendManager.',
                     );
                 }
 
