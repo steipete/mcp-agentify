@@ -333,32 +333,37 @@ export class FrontendServer {
     public start(): void {
         const maxRetries = 10;
         let retryCount = 0;
-        const startServer = (port: number): void => {
-            this.httpServer.listen(port)
+        const initialPort = this.port; // Store the initially configured port for logging
+
+        const startServer = (portToTry: number): void => {
+            this.httpServer.listen(portToTry)
                 .on('listening', () => {
-                    this.port = port; // Update the port with the one we actually bound to
-                    this.logger.info(`Frontend WebServer listening on http://localhost:${port}`);
+                    if (this.port !== portToTry) { // Port was changed due to retries
+                        this.logger.info(`Successfully bound to alternative port ${portToTry} after initial port ${this.port} was in use.`);
+                    }
+                    this.port = portToTry; // Update the instance port to the one actually used
+                    this.logger.info(`FrontendServer listening on http://localhost:${this.port}`);
                 })
                 .on('error', (err: NodeJS.ErrnoException) => {
                     if (err.code === 'EADDRINUSE') {
-                        const nextPort = port + 1;
+                        const nextPort = portToTry + 1;
                         retryCount++;
                         if (retryCount < maxRetries) {
-                            this.logger.warn(`Port ${port} in use, trying port ${nextPort}`);
+                            this.logger.warn(`Port ${portToTry} in use, attempting next port ${nextPort} (attempt ${retryCount}/${maxRetries}).`);
                             startServer(nextPort);
                         } else {
-                            this.logger.fatal(`Failed to find an available port after ${maxRetries} attempts (tried ${this.port}-${port})`);
-                            throw new Error(`Unable to start server: all ports in range ${this.port}-${port} are in use`);
+                            this.logger.fatal(`Failed to find an available port after ${maxRetries} attempts (started from ${initialPort}, tried up to ${portToTry}). Server not started.`);
+                            // Optionally, we could throw an error here to make the failure more explicit upstream
+                            // throw new Error(`Unable to start server: all ports in range ${initialPort}-${portToTry} are in use`);
                         }
                     } else {
-                        // For any other error type, log and rethrow immediately
-                        this.logger.error({ err }, `Error starting server on port ${port}`);
-                        throw err;
+                        this.logger.error({ err }, `Error starting FrontendServer on port ${portToTry}. Server not started.`);
+                        // throw err; // Re-throw other errors
                     }
                 });
         };
 
-        startServer(this.port);
+        startServer(this.port); // Start with the initially configured port
     }
 
     public getPort(): number {
