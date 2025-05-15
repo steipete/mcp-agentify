@@ -230,113 +230,74 @@ The Debug UI provides the following sections:
 *   The `DebugWebServer` receives these log entries and trace events and broadcasts them to all connected WebSocket clients (i.e., open Debug UI pages).
 *   The client-side JavaScript (`public_debug_ui/script.js`) receives these WebSocket messages and dynamically updates the corresponding sections in the HTML to display the information.
 
-## Usage
+## Local Install and Global Usage (Advanced)
 
-`mcp-agentify` acts as an MCP server communicating via `stdio`.
+While `npm run dev` is great for active development and `npx mcp-agentify` (once published) is convenient for project-local use, you might want to install `mcp-agentify` globally from your local clone for broader testing or to simulate how a published global package would behave.
 
-### Connecting and Initializing
+### 1. Global Install from Local Clone
 
-When integrating `mcp-agentify` into an IDE or a development tool like Cursor or Windsurf, the tool itself typically handles the process of spawning `mcp-agentify` and establishing the `stdio` connection. As a user of such a tool, your primary concern is providing the correct `initializationOptions` to `mcp-agentify` through the tool's configuration interface (e.g., settings JSON, UI fields).
+After cloning the repository and ensuring all dependencies are installed (`npm install`):
 
-The structure of these `initializationOptions` is defined by `mcp-agentify` (see the `GatewayOptionsSchema` in `src/schemas.ts` and the "Configuration" section above for details). Below is an example of what you might put into your IDE's configuration field for `mcp-agentify`'s initialization options:
+1.  **Navigate to the project root directory:**
+    ```bash
+    cd path/to/mcp-agentify
+    ```
+2.  **Build the project (if you want to install the compiled version):**
+    ```bash
+    npm run build
+    ```
+3.  **Install globally:**
+    To install the current local version globally, use:
+    ```bash
+    npm install -g .
+    ```
+    This command links the current directory (`.`) as a global package. If you've run `npm run build`, it will typically link the compiled version based on your `package.json`'s `bin` and `files` fields.
 
-**Example `initializationOptions` (for IDE settings):**
+4.  **Run the globally installed command:**
+    Now you should be able to run `mcp-agentify` from any directory:
+    ```bash
+    mcp-agentify
+    ```
+    The gateway will start and listen on `stdio`.
 
-```json
-{
-  "logLevel": "debug",
-  "OPENAI_API_KEY": "sk-YourOpenAIKeyFromASecureSource", // Or rely on .env on the server
-  "DEBUG_PORT": 3001,
-  "backends": [
-    {
-      "id": "filesystem",
-      "displayName": "Local Filesystem",
-      "type": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "${workspaceFolder}", // IDE might substitute this with the current project path
-        "/tmp/shared_work_area"
-      ],
-      "env": { 
-        "FILESYSTEM_LOG_LEVEL": "info"
-      }
-    },
-    {
-      "id": "mcpBrowserbase",
-      "displayName": "Web Browser via Browserbase",
-      "type": "stdio",
-      "command": "npx",
-      "args": [
-        "-y", 
-        "@smithery/cli@latest", 
-        "run", 
-        "@browserbasehq/mcp-browserbase", 
-        "--key", "bb_api_YOUR_BROWSERBASE_KEY" // Ensure this key is securely managed
-      ]
-    }
-    // Add other configured backend tools here
-  ]
-}
-```
+5.  **Uninstalling:**
+    To remove the global link, you'll typically use the package name defined in `package.json`:
+    ```bash
+    npm uninstall -g @your-scope/mcp-agentify # Replace with actual package name
+    ```
+    If you used a different name or if it was just a link, `npm unlink .` from the project directory might also be needed, or check `npm list -g --depth=0` to find the linked package name.
 
-**Explanation for IDE Users:**
-*   You would typically find a setting in your IDE (e.g., Cursor, Windsurf) where you specify the command to run `mcp-agentify` (e.g., `npx mcp-agentify` or the path to the executable) and a place to input the JSON blob for `initializationOptions`.
-*   The IDE sends these options to `mcp-agentify` when it starts the server as part of the standard MCP `initialize` request.
-*   Variables like `${workspaceFolder}` are often placeholders that the IDE will replace with actual values from your current project context.
-*   Ensure any API keys (like `OPENAI_API_KEY` or Browserbase keys) are handled securely according to your IDE's recommendations (e.g., using environment variables set for the IDE, or its own secret management if available). If `OPENAI_API_KEY` is set in `mcp-agentify`'s `.env` file (see "Configuration" section), it will take precedence.
+### 2. Using `npm link` (Recommended for Development)
 
-*(For developers building a custom client that programmatically spawns and connects to `mcp-agentify`, the following conceptual TypeScript snippet shows how these options would be part of the `InitializeParams` sent via `connection.sendRequest('initialize', initParams);` The `initializationOptions` object shown above would be assigned to `initParams.initializationOptions`.)*
+`npm link` is a more development-friendly way to create a global-like symlink to your local project. This means changes you make to your local code (even without rebuilding, if you run the linked version via `ts-node` or if your IDE points to the source) can be reflected immediately when you run the global command.
 
-```typescript
-// Conceptual: How a custom client might send these options
-// import type { InitializeParams } from 'vscode-languageserver-protocol';
-// const initParams: InitializeParams = {
-//   processId: process.pid || null,
-//   clientInfo: { name: "MyCustomClient", version: "1.0.0" },
-//   rootUri: null,
-//   capabilities: {},
-//   initializationOptions: { /* JSON object from above goes here */ }
-// };
-// await connection.sendRequest('initialize', initParams);
-```
+1.  **Navigate to the project root directory:**
+    ```bash
+    cd path/to/mcp-agentify
+    ```
+2.  **Create the link:**
+    ```bash
+    npm link
+    ```
+    This creates a global symlink named after your package name (e.g., `mcp-agentify` or `@your-scope/mcp-agentify`) that points to your current project directory.
 
-### Orchestrating Tasks via `agentify/orchestrateTask`
+3.  **Run the linked command:**
+    You can now run `mcp-agentify` (or your package name) from any terminal:
+    ```bash
+    mcp-agentify
+    ```
+    If your `package.json` `bin` points to `dist/cli.js`, you'll need to run `npm run build` for changes to `src` to be reflected in the linked command. If your `bin` could somehow point to a `ts-node` invoker for `src/cli.ts` (more advanced setup), then changes might be live.
 
-Once initialized, send natural language queries to the `agentify/orchestrateTask` method. The gateway will use the LLM to choose a backend tool and execute the corresponding MCP call.
+4.  **Unlinking:**
+    To remove the symlink:
+    ```bash
+    npm unlink --no-save @your-scope/mcp-agentify # Replace with actual package name
+    # or from the project directory:
+    # npm unlink
+    ```
 
-**Parameters:**
-```typescript
-interface AgentifyOrchestrateTaskParams {
-  query: string; // Natural language query
-  context?: {
-    activeDocumentURI?: string | null;
-    currentWorkingDirectory?: string | null;
-    selectionText?: string | null;
-  } | null;
-}
-```
-
-**Returns:** `Promise<any>` (The direct result from the chosen backend MCP method).
-
-**Example:**
-```typescript
-async function listFiles(connection: MessageConnection) {
-  if (!connection) return;
-  try {
-    const result = await connection.sendRequest('agentify/orchestrateTask', {
-      query: "List all text files in my project's root directory",
-      context: {
-        currentWorkingDirectory: "/Users/Shared/TestPoCDir1" // Example context
-      }
-    });
-    console.log("Task orchestrateTask result:", result);
-  } catch (error) {
-    console.error("Error orchestrating task:", error);
-  }
-}
-```
+**Note on `.env` with Global Installs:**
+When running a globally installed or linked `mcp-agentify`, it will look for a `.env` file in the *current working directory* from where you run the command, not necessarily from the `mcp-agentify` project's original root. For consistent behavior, especially with API keys, ensure your `.env` file is in the directory where you execute the `mcp-agentify` command, or configure these settings via `initializationOptions` from your client tool.
 
 ## Development
 
