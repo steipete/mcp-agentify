@@ -223,7 +223,7 @@ Regardless of which method above your IDE uses to *start* `mcp-agentify`, it wil
 {
   "logLevel": "trace",
   "OPENAI_API_KEY": "sk-YourOpenAIKeyFromSecureStorageOrEnv",
-  "DEBUG_PORT": 3001,
+  "DEBUG_PORT": 3030,
   "backends": [
     {
       "id": "filesystem",
