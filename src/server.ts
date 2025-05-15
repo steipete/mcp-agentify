@@ -71,14 +71,16 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
             const debugStreamForPino = debugWebServerInstance?.getLogStream();
             if (debugStreamForPino) {
                 tempPinoLogger = initializeLogger(
-                    { logLevel: earlyLogLevel },
-                    undefined,
-                    debugStreamForPino,
+                    { logLevel: earlyLogLevel }, undefined, debugStreamForPino,
                 );
                 debugWebServerInstance.updateLogger(tempPinoLogger);
-                tempPinoLogger.info('[GATEWAY SERVER PRE-INIT] DebugWebServer started and logger updated with its stream.');
+                tempPinoLogger.info(
+                    '[GATEWAY SERVER PRE-INIT] DebugWebServer started and logger updated with its stream.',
+                );
             } else {
-                tempPinoLogger.info('[GATEWAY SERVER PRE-INIT] DebugWebServer started (no stream returned for logger).');
+                tempPinoLogger.info(
+                    '[GATEWAY SERVER PRE-INIT] DebugWebServer started (no stream returned for logger).',
+                );
             }
         } catch (err) {
             tempPinoLogger.error({ err }, '[GATEWAY SERVER PRE-INIT] Failed to start DebugWebServer early.');
@@ -196,32 +198,47 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                                     newDebugStream,
                                 );
                                 debugWebServerInstance.updateLogger(pinoLogger);
-                                pinoLogger.info('[GATEWAY SERVER] DebugWebServer started by client options and logger updated.');
+                                pinoLogger.info(
+                                    '[GATEWAY SERVER] DebugWebServer started by client options and logger updated.',
+                                );
                             } else {
-                                pinoLogger.info('[GATEWAY SERVER] DebugWebServer started by client options (no stream returned for logger).');
+                                pinoLogger.info(
+                                    '[GATEWAY SERVER] DebugWebServer started by client options (no stream returned for logger).',
+                                );
                             }
                         } catch (err) {
-                            pinoLogger.error({ err }, '[GATEWAY SERVER] Failed to start DebugWebServer as per client options.');
+                            pinoLogger.error(
+                                { err }, 
+                                '[GATEWAY SERVER] Failed to start DebugWebServer as per client options.',
+                            );
                         }
                     } else {
                         if (gatewayOptions.logLevel && gatewayOptions.logLevel !== pinoLogger.level) {
-                            pinoLogger.info(`[GATEWAY SERVER] Log level changed by client. Re-initializing logger to ${gatewayOptions.logLevel}.`);
+                            pinoLogger.info(
+                                `[GATEWAY SERVER] Log level changed by client. Re-initializing logger to ${gatewayOptions.logLevel}.`,
+                            );
                             const debugStream = debugWebServerInstance.getLogStream();
                             pinoLogger = initializeLogger(
                                 { logLevel: gatewayOptions.logLevel as PinoLogLevel },
-                                undefined,
+                                undefined, 
                                 debugStream,
                             );
                         }
                         debugWebServerInstance.updateLogger(pinoLogger);
-                        pinoLogger.info('[GATEWAY SERVER] DebugWebServer was already running; logger (if changed) and gateway options updated.');
+                        pinoLogger.info(
+                            '[GATEWAY SERVER] DebugWebServer was already running; logger (if changed) and gateway options updated.',
+                        );
                     }
                 } else if (debugWebServerInstance) {
-                    pinoLogger.warn('[GATEWAY SERVER] Client did not specify a DEBUG_PORT, but DebugWebServer was running. It will continue to run based on initial (ENV) settings.');
+                    pinoLogger.warn(
+                        '[GATEWAY SERVER] Client did not specify a DEBUG_PORT, but DebugWebServer was running. It will continue to run based on initial (ENV) settings.',
+                    );
                 }
 
                 if (gatewayOptions.logLevel && gatewayOptions.logLevel !== pinoLogger.level) {
-                    pinoLogger.info(`[GATEWAY SERVER] Log level changing from ${pinoLogger.level} to ${gatewayOptions.logLevel} based on final merged options.`);
+                    pinoLogger.info(
+                        `[GATEWAY SERVER] Log level changing from ${pinoLogger.level} to ${gatewayOptions.logLevel} based on final merged options.`,
+                    );
                     const currentDebugStream = debugWebServerInstance?.getLogStream();
                     pinoLogger = initializeLogger(
                         { logLevel: gatewayOptions.logLevel as PinoLogLevel },
@@ -263,7 +280,9 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                 }
 
                 if (debugWebServerInstance && backendManager) {
-                    pinoLogger.info('[GATEWAY SERVER] DebugWebServer (if running) can now access BackendManager (if needed by its API).');
+                    pinoLogger.info(
+                        '[GATEWAY SERVER] DebugWebServer (if running) can now access BackendManager (if needed by its API).',
+                    );
                 }
 
                 pinoLogger.info(
