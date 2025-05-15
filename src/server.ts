@@ -17,13 +17,13 @@ import { initializeLogger, getLogger, type PinoLogLevel } from './logger';
 import { BackendManager } from './backendManager';
 import { LLMOrchestratorService } from './llmOrchestrator';
 import { DebugWebServer } from './debugWebServer';
-import type { GatewayOptions, AgentifyOrchestrateTaskParams, Plan, McpTraceEntry } from './interfaces';
-import { GatewayOptionsSchema, AgentifyOrchestrateTaskParamsSchema } from './schemas';
+import type { GatewayOptions, GatewayClientInitOptions, AgentifyOrchestrateTaskParams, Plan, McpTraceEntry } from './interfaces';
+import { GatewayClientInitOptionsSchema, AgentifyOrchestrateTaskParamsSchema } from './schemas';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 let pinoLogger: PinoLoggerType<PinoLogLevel>;
-let gatewayOptions: GatewayOptions | undefined;
+let internalGatewayOptions: GatewayOptions; // Renamed for clarity, this is the true internal config
 let backendManager: BackendManager | undefined;
 let llmOrchestrator: LLMOrchestratorService | undefined;
 let debugWebServerInstance: DebugWebServer | undefined;
@@ -47,47 +47,60 @@ function getPackageVersion(): string {
 }
 
 export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOptions>) {
-    // --- START EARLY INITIALIZATION ---
-    const earlyLogLevel: PinoLogLevel = initialCliOptions?.logLevel || 'info';
-    let tempPinoLogger: PinoLoggerType<PinoLogLevel> = initializeLogger({ logLevel: earlyLogLevel });
+    // --- START EARLY AND FINAL CORE INITIALIZATION ---
+    const envLogLevel: PinoLogLevel = initialCliOptions?.logLevel || 'info';
+    const envDebugPort: number | null = initialCliOptions?.DEBUG_PORT || 3030; // Default to 3030
+    const envOpenApiKey: string | undefined = initialCliOptions?.OPENAI_API_KEY; // From env
 
-    if (initialCliOptions?.DEBUG_PORT && initialCliOptions.DEBUG_PORT > 0) {
+    let tempPinoLogger: PinoLoggerType<PinoLogLevel> = initializeLogger({ logLevel: envLogLevel });
+
+    if (envDebugPort && envDebugPort > 0) {
         tempPinoLogger.info(
-            `[GATEWAY SERVER PRE-INIT] DEBUG_PORT ${initialCliOptions.DEBUG_PORT} found in initial options. Attempting to start DebugWebServer early.`,
+            `[GATEWAY SERVER PRE-INIT] DEBUG_PORT ${envDebugPort} active (from env or default). Attempting to start DebugWebServer.`,
         );
         try {
-            const partialGatewayOptsForDebug: Partial<GatewayOptions> = {
-                DEBUG_PORT: initialCliOptions.DEBUG_PORT,
-                logLevel: earlyLogLevel,
-            };
             debugWebServerInstance = new DebugWebServer(
-                initialCliOptions.DEBUG_PORT,
+                envDebugPort,
                 tempPinoLogger,
                 undefined,
-                partialGatewayOptsForDebug as GatewayOptions,
+                { DEBUG_PORT: envDebugPort, logLevel: envLogLevel } as GatewayOptions, // Partial for early start
             );
             debugWebServerInstance.start();
-
             const debugStreamForPino = debugWebServerInstance?.getLogStream();
             if (debugStreamForPino) {
                 tempPinoLogger = initializeLogger(
-                    { logLevel: earlyLogLevel }, undefined, debugStreamForPino,
+                    { logLevel: envLogLevel }, undefined, debugStreamForPino,
                 );
                 debugWebServerInstance.updateLogger(tempPinoLogger);
-                tempPinoLogger.info(
-                    '[GATEWAY SERVER PRE-INIT] DebugWebServer started and logger updated with its stream.',
-                );
-            } else {
-                tempPinoLogger.info(
-                    '[GATEWAY SERVER PRE-INIT] DebugWebServer started (no stream returned for logger).',
-                );
+                tempPinoLogger.info('[GATEWAY SERVER PRE-INIT] DebugWebServer started and logger updated with its stream.');
             }
         } catch (err) {
             tempPinoLogger.error({ err }, '[GATEWAY SERVER PRE-INIT] Failed to start DebugWebServer early.');
         }
     }
     pinoLogger = tempPinoLogger;
-    // --- END EARLY INITIALIZATION ---
+
+    // Construct the core part of internalGatewayOptions from environment variables / defaults
+    // `backends` will be added during 'initialize'
+    internalGatewayOptions = {
+        logLevel: envLogLevel,
+        DEBUG_PORT: envDebugPort,
+        OPENAI_API_KEY: envOpenApiKey,
+        backends: [], // Initialize with empty backends; will be populated from client
+    };
+
+    if (!internalGatewayOptions.OPENAI_API_KEY) {
+        pinoLogger.fatal('[GATEWAY SERVER] CRITICAL: OPENAI_API_KEY is not set in the environment. mcp-agentify cannot function.');
+        // Allow to connect but orchestrateTask will fail if key is missing.
+        // Or: process.exit(1); // More drastic: refuse to start without API key
+    }
+
+    pinoLogger.info(
+        { configFromEnv: { logLevel: internalGatewayOptions.logLevel, DEBUG_PORT: internalGatewayOptions.DEBUG_PORT, OPENAI_API_KEY: internalGatewayOptions.OPENAI_API_KEY ? '***' : undefined } },
+        '[GATEWAY SERVER] Core configuration initialized from environment/defaults.'
+    );
+
+    // --- END EARLY AND FINAL CORE INITIALIZATION ---
 
     const connection: MessageConnection = createMessageConnection(
         process.stdin,
@@ -153,111 +166,55 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
             try {
                 pinoLogger.info({ initParamsReceived: params }, "[GATEWAY SERVER] Received 'initialize' request.");
 
-                const mergedOptionsFromClientAndCli = {
-                    ...(initialCliOptions || {}),
-                    ...(params.initializationOptions || {}),
-                };
-                const validationResult = GatewayOptionsSchema.safeParse(mergedOptionsFromClientAndCli);
-                if (!validationResult.success) {
-                    const errorMsg = 'Invalid initialization options provided.';
-                    tempConsoleLogger.error(`${errorMsg} Errors: ${JSON.stringify(validationResult.error.format())}`);
+                pinoLogger.info({ initParamsReceived: params.initializationOptions }, "[GATEWAY SERVER] Received 'initialize' request with client options.");
+
+                // Validate client-provided options, primarily for `backends`
+                const clientOptionsValidation = GatewayClientInitOptionsSchema.safeParse(params.initializationOptions);
+                if (!clientOptionsValidation.success) {
+                    const errorMsg = 'Invalid client initializationOptions structure (backends are required).';
+                    pinoLogger.error({ error: clientOptionsValidation.error.format() }, errorMsg);
                     throw new ResponseError(ErrorCodes.InvalidParams, errorMsg, {
-                        validationErrors: validationResult.error.format(),
+                        validationErrors: clientOptionsValidation.error.format(),
                     });
                 }
-                gatewayOptions = validationResult.data;
-                const apiKeyToUse = process.env.OPENAI_API_KEY || gatewayOptions.OPENAI_API_KEY;
-                if (!apiKeyToUse) {
+                const clientProvidedBackends = clientOptionsValidation.data.backends;
+
+                // Populate `backends` in the internalGatewayOptions
+                internalGatewayOptions.backends = clientProvidedBackends;
+
+                // OPENAI_API_KEY check again, crucial for operation, should be from ENV already
+                if (!internalGatewayOptions.OPENAI_API_KEY) {
                     const errorMsg =
-                        'OpenAI API Key is required but not found in environment variables or initialization options.';
-                    tempConsoleLogger.error(errorMsg);
-                    throw new ResponseError(ErrorCodes.InvalidParams, errorMsg, { missingKey: 'OPENAI_API_KEY' });
+                        'OpenAI API Key is required for mcp-agentify to function and was not found in its environment.';
+                    pinoLogger.error(errorMsg);
+                    throw new ResponseError(ErrorCodes.ServerNotInitialized, errorMsg, { missingKey: 'OPENAI_API_KEY' });
                 }
 
-                if (gatewayOptions.DEBUG_PORT && gatewayOptions.DEBUG_PORT > 0) {
-                    if (!debugWebServerInstance) {
-                        pinoLogger.info(
-                            `[GATEWAY SERVER] DEBUG_PORT ${gatewayOptions.DEBUG_PORT} specified by client. Initializing DebugWebServer.`,
-                        );
-                        const loggerForNewDebugServer: PinoLoggerType<PinoLogLevel> = pinoLogger;
-
-                        try {
-                            debugWebServerInstance = new DebugWebServer(
-                                gatewayOptions.DEBUG_PORT,
-                                loggerForNewDebugServer,
-                                undefined,
-                                gatewayOptions,
-                            );
-                            debugWebServerInstance.start();
-
-                            const newDebugStream = debugWebServerInstance.getLogStream();
-                            if (newDebugStream) {
-                                pinoLogger = initializeLogger(
-                                    { logLevel: gatewayOptions.logLevel as PinoLogLevel },
-                                    undefined,
-                                    newDebugStream,
-                                );
-                                debugWebServerInstance.updateLogger(pinoLogger);
-                                pinoLogger.info(
-                                    '[GATEWAY SERVER] DebugWebServer started by client options and logger updated.',
-                                );
-                            } else {
-                                pinoLogger.info(
-                                    '[GATEWAY SERVER] DebugWebServer started by client options (no stream returned for logger).',
-                                );
-                            }
-                        } catch (err) {
-                            pinoLogger.error(
-                                { err }, 
-                                '[GATEWAY SERVER] Failed to start DebugWebServer as per client options.',
-                            );
-                        }
-                    } else {
-                        if (gatewayOptions.logLevel && gatewayOptions.logLevel !== pinoLogger.level) {
-                            pinoLogger.info(
-                                `[GATEWAY SERVER] Log level changed by client. Re-initializing logger to ${gatewayOptions.logLevel}.`,
-                            );
-                            const debugStream = debugWebServerInstance.getLogStream();
-                            pinoLogger = initializeLogger(
-                                { logLevel: gatewayOptions.logLevel as PinoLogLevel },
-                                undefined, 
-                                debugStream,
-                            );
-                        }
-                        debugWebServerInstance.updateLogger(pinoLogger);
-                        pinoLogger.info(
-                            '[GATEWAY SERVER] DebugWebServer was already running; logger (if changed) and gateway options updated.',
-                        );
-                    }
-                } else if (debugWebServerInstance) {
+                // Debug Web Server should already be running if DEBUG_PORT was set via ENV or defaulted.
+                // If client *also* sent a DEBUG_PORT in its (now mostly ignored for this) options, log it but take no action if different.
+                if (params.initializationOptions?.DEBUG_PORT && 
+                    params.initializationOptions.DEBUG_PORT !== internalGatewayOptions.DEBUG_PORT) {
                     pinoLogger.warn(
-                        '[GATEWAY SERVER] Client did not specify a DEBUG_PORT, but DebugWebServer was running. It will continue to run based on initial (ENV) settings.',
+                        `[GATEWAY SERVER] Client sent DEBUG_PORT ${params.initializationOptions.DEBUG_PORT}, but gateway is using ${internalGatewayOptions.DEBUG_PORT} (from env/default).`
                     );
                 }
-
-                if (gatewayOptions.logLevel && gatewayOptions.logLevel !== pinoLogger.level) {
-                    pinoLogger.info(
-                        `[GATEWAY SERVER] Log level changing from ${pinoLogger.level} to ${gatewayOptions.logLevel} based on final merged options.`,
+                // Same for logLevel
+                if (params.initializationOptions?.logLevel && 
+                    params.initializationOptions.logLevel !== internalGatewayOptions.logLevel) {
+                    pinoLogger.warn(
+                        `[GATEWAY SERVER] Client sent logLevel ${params.initializationOptions.logLevel}, but gateway is using ${internalGatewayOptions.logLevel} (from env/default).`
                     );
-                    const currentDebugStream = debugWebServerInstance?.getLogStream();
-                    pinoLogger = initializeLogger(
-                        { logLevel: gatewayOptions.logLevel as PinoLogLevel },
-                        undefined,
-                        currentDebugStream,
-                    );
-                    if (debugWebServerInstance) {
-                        debugWebServerInstance.updateLogger(pinoLogger);
-                    }
                 }
 
                 pinoLogger.info(
-                    { gatewayOptions: { ...gatewayOptions, OPENAI_API_KEY: '***' } },
-                    '[GATEWAY SERVER] Options processed. Logger initialized.',
+                    { finalGatewayConfig: { ...internalGatewayOptions, OPENAI_API_KEY: '***' } },
+                    '[GATEWAY SERVER] Final gateway configuration assembled.',
                 );
+
                 pinoLogger.info('[GATEWAY SERVER] Initializing BackendManager...');
                 backendManager = new BackendManager(pinoLogger);
                 try {
-                    await backendManager.initializeAllBackends(gatewayOptions.backends);
+                    await backendManager.initializeAllBackends(internalGatewayOptions.backends);
                     pinoLogger.info('[GATEWAY SERVER] BackendManager initialized all backends successfully.');
                     backendManager.on('mcpTrace', (traceEntry: McpTraceEntry) => {
                         if (debugWebServerInstance) {
@@ -271,7 +228,11 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                 }
                 pinoLogger.info('[GATEWAY SERVER] Initializing LLMOrchestratorService...');
                 try {
-                    llmOrchestrator = new LLMOrchestratorService(apiKeyToUse, gatewayOptions.backends, pinoLogger);
+                    llmOrchestrator = new LLMOrchestratorService(
+                        internalGatewayOptions.OPENAI_API_KEY, // Definitely use the one from env
+                        internalGatewayOptions.backends,
+                        pinoLogger
+                    );
                     pinoLogger.info('[GATEWAY SERVER] LLMOrchestratorService initialized.');
                 } catch (err: unknown) {
                     const llmInitErrorMsg = `Fatal error initializing LLMOrchestratorService: ${(err as Error).message}`;
@@ -344,9 +305,9 @@ export async function startAgentifyServer(initialCliOptions?: Partial<GatewayOpt
                         validationErrors: validatedParams.error.format(),
                     });
                 }
-                if (!llmOrchestrator || !backendManager || !gatewayOptions) {
+                if (!llmOrchestrator || !backendManager || !internalGatewayOptions.backends.length) {
                     handlerLogger.warn(
-                        "'agentify/orchestrateTask' called before gateway was fully initialized (llm, backend, or options missing).",
+                        "'agentify/orchestrateTask' called before gateway was fully initialized (llm, backend, or backends config missing).",
                     );
                     throw new ResponseError(
                         -32001,
