@@ -1,5 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
+import type { GatewayOptions } from '../../../src/interfaces';
 
 interface BackendStatus {
     id: string;
@@ -30,44 +31,61 @@ export function StatusTab() {
     useEffect(() => {
         // Fetch Status
         fetch('/api/status')
-            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Failed to fetch status: ${res.status} ${res.statusText}`)))
-            .then(data => setStatusData(data))
-            .catch(err => {
+            .then((res) =>
+                res.ok
+                    ? res.json()
+                    : Promise.reject(new Error(`Failed to fetch status: ${res.status} ${res.statusText}`)),
+            )
+            .then((data) => setStatusData(data))
+            .catch((err) => {
                 console.error('Error fetching status:', err);
-                setError(prev => prev ? `${prev}\nError fetching status: ${err.message}` : `Error fetching status: ${err.message}`);
+                setError((prev) =>
+                    prev ? `${prev}\nError fetching status: ${err.message}` : `Error fetching status: ${err.message}`,
+                );
             });
 
         // Fetch Current Effective Config
         fetch('/api/config')
-            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Failed to fetch config: ${res.status} ${res.statusText}`)))
-            .then(data => setConfigData(data))
-            .catch(err => {
+            .then((res) =>
+                res.ok
+                    ? res.json()
+                    : Promise.reject(new Error(`Failed to fetch config: ${res.status} ${res.statusText}`)),
+            )
+            .then((data) => setConfigData(data))
+            .catch((err) => {
                 console.error('Error fetching current config:', err);
-                setError(prev => prev ? `${prev}\nError fetching current config: ${err.message}` : `Error fetching current config: ${err.message}`);
+                setError((prev) =>
+                    prev
+                        ? `${prev}\nError fetching current config: ${err.message}`
+                        : `Error fetching current config: ${err.message}`,
+                );
             });
 
         // Test OpenAI Key
         setOpenAIKeyStatus('Testing...');
         fetch('/api/test-openai')
-            .then(res => {
+            .then((res) => {
                 if (!res.ok) {
                     // Try to get a message from the body, then fallback to statusText
-                    return res.json().then(errData => {
-                        throw new Error(errData.message || `API error: ${res.status} ${res.statusText}`);
-                    }).catch(() => {
-                        throw new Error(`API error: ${res.status} ${res.statusText} (No JSON body)`);
-                    });
+                    return res
+                        .json()
+                        .then((errData) => {
+                            throw new Error(errData.message || `API error: ${res.status} ${res.statusText}`);
+                        })
+                        .catch(() => {
+                            throw new Error(`API error: ${res.status} ${res.statusText} (No JSON body)`);
+                        });
                 }
                 return res.json();
             })
-            .then(data => {
+            .then((data) => {
                 if (data.isValid) {
                     setOpenAIKeyStatus('Valid');
                 } else {
                     setOpenAIKeyStatus('Invalid');
                 }
             })
-            .catch(err => {
+            .catch((err) => {
                 console.error('Error testing OpenAI key:', err);
                 setOpenAIKeyStatus('Error');
                 // Optionally append this error to the main error state, or handle separately
@@ -86,16 +104,25 @@ export function StatusTab() {
                 {statusData ? (
                     <div>
                         <ul>
-                            <li><strong>Status:</strong> {statusData.status || 'N/A'}</li>
-                            <li><strong>Uptime:</strong> {statusData.uptime?.toFixed(2) || 'N/A'}s</li>
-                            <li><strong>OpenAI Key:</strong> <span class={`status-${openAIKeyStatus.toLowerCase().replace(/\.\.\./, '')}`}>{openAIKeyStatus}</span></li>
+                            <li>
+                                <strong>Status:</strong> {statusData.status || 'N/A'}
+                            </li>
+                            <li>
+                                <strong>Uptime:</strong> {statusData.uptime?.toFixed(2) || 'N/A'}s
+                            </li>
+                            <li>
+                                <strong>OpenAI Key:</strong>{' '}
+                                <span class={`status-${openAIKeyStatus.toLowerCase().replace(/\.\.\./, '')}`}>
+                                    {openAIKeyStatus}
+                                </span>
+                            </li>
                         </ul>
                         <h3>Backends:</h3>
                         {statusData.backends && statusData.backends.length > 0 ? (
                             <ul>
-                                {statusData.backends.map(backend => (
+                                {statusData.backends.map((backend) => (
                                     <li key={backend.id}>
-                                        <strong>{backend.displayName || backend.id}:</strong> 
+                                        <strong>{backend.displayName || backend.id}:</strong>
                                         <span class={backend.isReady ? 'status-ready' : 'status-not-ready'}>
                                             {backend.isReady ? 'Ready' : 'Not Ready'}
                                         </span>
@@ -121,4 +148,4 @@ export function StatusTab() {
             </section>
         </div>
     );
-} 
+}
