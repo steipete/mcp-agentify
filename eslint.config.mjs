@@ -1,7 +1,6 @@
 // eslint.config.js
 import globals from "globals";
 import tseslint from "typescript-eslint";
-import prettierRecommended from "eslint-plugin-prettier/recommended";
 
 export default tseslint.config(
   {
@@ -50,5 +49,27 @@ export default tseslint.config(
       // Add other rules or overrides here
     },
   },
-  prettierRecommended, // Ensures Prettier rules are applied last
+  {
+    files: ["frontend/src/**/*.tsx"],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+        ecmaVersion: 2020,
+        sourceType: "module",
+      },
+      globals: {
+        ...globals.browser,
+        ...globals.es2020,
+      },
+    },
+    plugins: {
+      "@typescript-eslint": tseslint.plugin,
+    },
+    rules: {
+      ...tseslint.configs.recommended.rules,
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    },
+  },
 );

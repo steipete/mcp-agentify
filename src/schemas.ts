@@ -43,7 +43,7 @@ export type GatewayClientInitOptions = z.infer<typeof GatewayClientInitOptionsSc
 // It will be populated from environment variables first, then potentially from client for `backends`.
 export const GatewayOptionsSchema = z.object({
     logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional().default('info'),
-    OPENAI_API_KEY: z.string().optional(), // Can be from env or client, env takes precedence.
+    OPENAI_API_KEY: z.string().min(1).optional(), // Can be from env or client, env takes precedence.
     ANTHROPIC_API_KEY: z.string().optional(),
     COHERE_API_KEY: z.string().optional(),
     // Add other API keys as needed following the same pattern

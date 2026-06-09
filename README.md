@@ -23,6 +23,8 @@ AI-Powered MCP Gateway for Tool Orchestration
 
 ## Installation
 
+Requires Node.js 20.19 or later in the 20.x line, or Node.js 22.12 and later.
+
 As a dependency in your project:
 ```bash
 npm install mcp-agentify

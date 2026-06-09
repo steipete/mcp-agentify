@@ -129,7 +129,7 @@ describe('LLMOrchestratorService', () => {
             expect(mockCreate).toHaveBeenCalledOnce();
             expect(mockCreate).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    model: 'gpt-4-turbo-preview',
+                    model: 'gpt-4.1',
                     tools: orchestrator.getAvailableTools(),
                     messages: expect.arrayContaining([
                         expect.objectContaining({ role: 'system' }),

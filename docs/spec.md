@@ -26,7 +26,7 @@ Develop `mcp-agentify`, a Node.js/TypeScript application acting as an AI-Powered
 **2. Core Technologies**
 
 *   **Language:** TypeScript (target ES2020 or newer, CommonJS modules initially for broader compatibility with some tools, but ESM is fine if all deps support it well).
-*   **Runtime:** Node.js (LTS version, e.g., >=18.0.0).
+*   **Runtime:** Node.js 20.19 or later in the 20.x line, or Node.js 22.12 and later.
 *   **MCP Communication:** `vscode-jsonrpc/node`.
 *   **LLM Interaction:** `openai` (latest stable version).
 *   **Process Management:** Node.js `child_process` module.
