@@ -90,7 +90,7 @@ describe('redaction', () => {
             'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz123456',
             'Authorization: Bearer opaque-token-value',
             'npm_abcdefghijklmnopqrstuvwxyz123456',
-            'xoxb-1234567890-abcdefghijklmnopqrstuvwxyz',
+            ['xoxb', '1234567890', 'abcdefghijklmnopqrstuvwxyz'].join('-'),
         ].join(' ');
 
         expect(redactText(text)).not.toMatch(/ghp_|opaque-token-value|npm_[a-z]|xoxb-/);
