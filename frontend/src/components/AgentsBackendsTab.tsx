@@ -1,27 +1,61 @@
-import { h } from 'preact';
-// import { useState, useEffect } from 'preact/hooks'; // If fetching data
+import { useEffect, useState } from 'preact/hooks';
+
+interface BackendState {
+    id: string;
+    displayName: string;
+    isReady: boolean;
+    toolCount: number;
+    error?: string;
+}
 
 export function AgentsBackendsTab() {
-    // Placeholder for displaying dynamic agents and backend tool statuses
-    // This will later fetch from /api/status (for backends) 
-    // and potentially have a way to list dynamic agents (from /api/config-details or a new endpoint)
-    return (
-        <div class="tab-content-item" id="agents-backends-section-content">
-            <h2>Dynamic Agents & Backend Status</h2>
-            
-            <section id="dynamic-agents-list">
-                <h3>Dynamically Registered Agents (from AGENTS env var)</h3>
-                {/* Logic to list agents from internalGatewayOptions.gptAgents will go here */}
-                {/* This might require passing data down from App.tsx or a shared context */}
-                <p><i>Agent list will appear here if AGENTS environment variable is set.</i></p>
-                {/* TODO: Add a simple chat interface per agent later */}
-            </section>
+    const [backends, setBackends] = useState<BackendState[]>([]);
+    const [agents, setAgents] = useState<string[]>([]);
+    const [error, setError] = useState<string | null>(null);
 
-            <section id="backend-tools-status">
-                <h3>Configured Backend Tools Status</h3>
-                {/* This will be similar to the existing status display for backends */}
-                <p><i>Backend tool statuses will appear here.</i></p>
+    useEffect(() => {
+        Promise.all([
+            fetch('/api/status').then((response) => response.json()),
+            fetch('/api/config').then((response) => response.json()),
+        ])
+            .then(([status, config]) => {
+                setBackends(status.backends || []);
+                setAgents(config.agents || []);
+            })
+            .catch((caughtError) => setError(String(caughtError)));
+    }, []);
+
+    return (
+        <div class="tab-content-item">
+            <h2>Agents & Backends</h2>
+            {error && <pre class="error-display">{error}</pre>}
+            <section>
+                <h3>UI Chat Agents</h3>
+                {agents.length > 0 ? (
+                    <ul>
+                        {agents.map((agent) => (
+                            <li key={agent}>{agent}</li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p>No UI chat agents configured.</p>
+                )}
+            </section>
+            <section>
+                <h3>Backend MCP Servers</h3>
+                {backends.length > 0 ? (
+                    <ul>
+                        {backends.map((backend) => (
+                            <li key={backend.id}>
+                                <strong>{backend.displayName}:</strong>{' '}
+                                {backend.isReady ? `Ready, ${backend.toolCount} tools` : backend.error || 'Not ready'}
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p>No backend state available.</p>
+                )}
             </section>
         </div>
     );
-} 
+}

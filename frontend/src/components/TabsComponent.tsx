@@ -1,4 +1,4 @@
-import { h, type ComponentChild } from 'preact';
+import type { ComponentChild } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 
 interface Tab {
@@ -19,7 +19,7 @@ export function TabsComponent({ tabs }: TabsComponentProps) {
         const hash = window.location.hash;
         if (hash.startsWith(HASH_PREFIX)) {
             const tabId = hash.substring(HASH_PREFIX.length);
-            return tabs.find(t => t.id === tabId) ? tabId : null;
+            return tabs.find((t) => t.id === tabId) ? tabId : null;
         }
         return null;
     }, [tabs]);
@@ -27,7 +27,7 @@ export function TabsComponent({ tabs }: TabsComponentProps) {
     const [activeTabId, setActiveTabId] = useState<string>(() => {
         const fromUrl = getTabIdFromUrl();
         if (fromUrl) return fromUrl;
-        return (tabs && tabs.length > 0) ? tabs[0].id : '';
+        return tabs && tabs.length > 0 ? tabs[0].id : '';
     });
 
     // Effect 1: Listen to URL hash changes and update state
@@ -62,7 +62,7 @@ export function TabsComponent({ tabs }: TabsComponentProps) {
         if (typeof window === 'undefined') return;
 
         if (tabs && tabs.length > 0) {
-            const currentTabIsValid = tabs.some(tab => tab.id === activeTabId);
+            const currentTabIsValid = tabs.some((tab) => tab.id === activeTabId);
             let targetTabId = activeTabId;
 
             if (!currentTabIsValid) {
@@ -74,20 +74,19 @@ export function TabsComponent({ tabs }: TabsComponentProps) {
                     return; // Exit early, the re-run will handle hash update
                 }
             }
-            
+
             // At this point, targetTabId is valid (either original activeTabId or defaulted to first tab)
             const newHash = `${HASH_PREFIX}${targetTabId}`;
             if (window.location.hash !== newHash) {
                 window.location.hash = newHash;
             }
-
         } else {
             // No tabs are present
             if (activeTabId !== '') {
                 setActiveTabId('');
             }
             if (window.location.hash.startsWith(HASH_PREFIX) && window.location.hash !== HASH_PREFIX) {
-                 // Only clear if it was a tab hash. Avoid clearing unrelated hashes.
+                // Only clear if it was a tab hash. Avoid clearing unrelated hashes.
                 window.location.hash = '';
             }
         }
@@ -103,7 +102,7 @@ export function TabsComponent({ tabs }: TabsComponentProps) {
         return <p>No tabs to display.</p>;
     }
 
-    const activeTabContent = tabs.find(tab => tab.id === activeTabId)?.content;
+    const activeTabContent = tabs.find((tab) => tab.id === activeTabId)?.content;
 
     return (
         <div>
@@ -119,9 +118,7 @@ export function TabsComponent({ tabs }: TabsComponentProps) {
                     </button>
                 ))}
             </div>
-            <div class="tab-content-area">
-                {activeTabContent}
-            </div>
+            <div class="tab-content-area">{activeTabContent}</div>
         </div>
     );
-} 
+}

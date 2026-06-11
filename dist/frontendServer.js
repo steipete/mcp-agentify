@@ -1,80 +1,90 @@
-import { existsSync } from 'node:fs';
-import * as http from 'node:http';
-import { resolve } from 'node:path';
-import { Writable } from 'node:stream';
-import express, { type Application, type RequestHandler } from 'express';
-import type { Logger } from 'pino';
-import { WebSocket, WebSocketServer, type VerifyClientCallbackSync } from 'ws';
-import type { BackendManager } from './backendManager';
-import type { GatewayOptions, LogEntry, McpTraceEntry } from './interfaces';
-import type { PinoLogLevel } from './logger';
-import type { LLMOrchestratorService } from './llmOrchestrator';
-import { redactGatewayOptions, redactText, redactValue } from './redaction';
-import { getPackageVersion } from './utils';
-
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.FrontendServer = void 0;
+const node_fs_1 = require("node:fs");
+const http = __importStar(require("node:http"));
+const node_path_1 = require("node:path");
+const node_stream_1 = require("node:stream");
+const express_1 = __importDefault(require("express"));
+const ws_1 = require("ws");
+const redaction_1 = require("./redaction");
+const utils_1 = require("./utils");
 const MAX_BUFFER_SIZE = 500;
-
-export class FrontendServer {
-    private readonly app: Application;
-    private readonly httpServer: http.Server;
-    private readonly wss: WebSocketServer;
-    private port: number;
-    private logger: Logger<PinoLogLevel>;
-    private readonly gatewayOptions: GatewayOptions;
-    private backendManager: BackendManager;
-    private llmOrchestrator?: LLMOrchestratorService;
-    private readonly logBuffer: LogEntry[] = [];
-    private readonly mcpTraceBuffer: McpTraceEntry[] = [];
-    private readonly logPassthroughStream: Writable;
-
-    constructor(
-        port: number,
-        logger: Logger<PinoLogLevel>,
-        backendManager: BackendManager,
-        gatewayOptions: GatewayOptions,
-    ) {
+class FrontendServer {
+    constructor(port, logger, backendManager, gatewayOptions) {
+        this.logBuffer = [];
+        this.mcpTraceBuffer = [];
         this.port = port;
         this.logger = logger.child({ component: 'FrontendServer' });
         this.backendManager = backendManager;
         this.gatewayOptions = gatewayOptions;
-        this.app = express();
+        this.app = (0, express_1.default)();
         this.httpServer = http.createServer(this.app);
-        const verifyClient: VerifyClientCallbackSync = ({ origin, req }) =>
-            this.isAllowedWebSocketRequest(origin, req.headers.host);
-        this.wss = new WebSocketServer({
+        const verifyClient = ({ origin, req }) => this.isAllowedWebSocketRequest(origin, req.headers.host);
+        this.wss = new ws_1.WebSocketServer({
             server: this.httpServer,
             verifyClient,
         });
         this.logPassthroughStream = this.createLogStream();
-
-        this.backendManager.on('mcpTrace', (trace: McpTraceEntry) => this.addMcpTrace(trace));
+        this.backendManager.on('mcpTrace', (trace) => this.addMcpTrace(trace));
         this.setupRoutes();
         this.setupWebSockets();
     }
-
-    public getLogStream(): Writable {
+    getLogStream() {
         return this.logPassthroughStream;
     }
-
-    public updateLogger(logger: Logger<PinoLogLevel>): void {
+    updateLogger(logger) {
         this.logger = logger.child({ component: 'FrontendServer' });
     }
-
-    public setLlmOrchestrator(orchestrator: LLMOrchestratorService): void {
+    setLlmOrchestrator(orchestrator) {
         this.llmOrchestrator = orchestrator;
     }
-
-    public getPort(): number {
+    getPort() {
         return this.port;
     }
-
-    public async start(): Promise<void> {
+    async start() {
         const initialPort = this.port;
         for (let attempt = 0; attempt < 10; attempt += 1) {
             const port = initialPort + attempt;
             try {
-                await new Promise<void>((resolvePromise, rejectPromise) => {
-                    const onError = (error: NodeJS.ErrnoException) => {
+                await new Promise((resolvePromise, rejectPromise) => {
+                    const onError = (error) => {
                         this.httpServer.off('listening', onListening);
                         rejectPromise(error);
                     };
@@ -89,34 +99,32 @@ export class FrontendServer {
                 this.port = port;
                 this.logger.info({ url: `http://127.0.0.1:${port}` }, 'Frontend UI listening.');
                 return;
-            } catch (error) {
-                if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || attempt === 9) {
+            }
+            catch (error) {
+                if (error.code !== 'EADDRINUSE' || attempt === 9) {
                     throw error;
                 }
             }
         }
     }
-
-    public async stop(): Promise<void> {
+    async stop() {
         for (const client of this.wss.clients) {
             client.terminate();
         }
-        await new Promise<void>((resolvePromise) => this.wss.close(() => resolvePromise()));
+        await new Promise((resolvePromise) => this.wss.close(() => resolvePromise()));
         if (!this.httpServer.listening) {
             return;
         }
-        await new Promise<void>((resolvePromise, rejectPromise) => {
+        await new Promise((resolvePromise, rejectPromise) => {
             this.httpServer.close((error) => (error ? rejectPromise(error) : resolvePromise()));
         });
     }
-
-    public addMcpTrace(trace: McpTraceEntry): void {
-        const sanitized = redactValue(trace) as McpTraceEntry;
+    addMcpTrace(trace) {
+        const sanitized = (0, redaction_1.redactValue)(trace);
         this.pushBounded(this.mcpTraceBuffer, sanitized);
         this.broadcast({ type: 'mcp_trace_entry', payload: sanitized });
     }
-
-    private setupRoutes(): void {
+    setupRoutes() {
         this.app.use((request, response, next) => {
             const host = request.headers.host;
             if (!this.isAllowedDashboardHost(host)) {
@@ -128,24 +136,21 @@ export class FrontendServer {
                 response.status(403).json({ message: 'Dashboard origin is not allowed.' });
                 return;
             }
-            if (
-                request.method === 'POST' &&
+            if (request.method === 'POST' &&
                 request.path.startsWith('/api/') &&
-                request.is('application/json') !== 'application/json'
-            ) {
+                request.is('application/json') !== 'application/json') {
                 response.status(415).json({ message: 'Dashboard API requires application/json.' });
                 return;
             }
             next();
         });
-        this.app.use(express.json({ limit: '256kb' }));
-        const packagedStaticPath = resolve(__dirname, 'frontend');
-        const staticPath = existsSync(resolve(packagedStaticPath, 'index.html'))
+        this.app.use(express_1.default.json({ limit: '256kb' }));
+        const packagedStaticPath = (0, node_path_1.resolve)(__dirname, 'frontend');
+        const staticPath = (0, node_fs_1.existsSync)((0, node_path_1.resolve)(packagedStaticPath, 'index.html'))
             ? packagedStaticPath
-            : resolve(__dirname, '..', 'dist', 'frontend');
-        this.app.use(express.static(staticPath));
-        this.app.get('/', (_request, response) => response.sendFile(resolve(staticPath, 'index.html')));
-
+            : (0, node_path_1.resolve)(__dirname, '..', 'dist', 'frontend');
+        this.app.use(express_1.default.static(staticPath));
+        this.app.get('/', (_request, response) => response.sendFile((0, node_path_1.resolve)(staticPath, 'index.html')));
         this.app.get('/api/status', (_request, response) => {
             response.json({
                 status: 'running',
@@ -155,8 +160,7 @@ export class FrontendServer {
                 backends: this.backendManager.getAllBackendStates(),
             });
         });
-
-        const sanitizedConfig = () => redactGatewayOptions(this.gatewayOptions);
+        const sanitizedConfig = () => (0, redaction_1.redactGatewayOptions)(this.gatewayOptions);
         this.app.get('/api/config', (_request, response) => response.json(sanitizedConfig()));
         this.app.get('/api/config-details', (_request, response) => {
             response.json({
@@ -165,16 +169,12 @@ export class FrontendServer {
             });
         });
         this.app.get('/api/gateway-version', (_request, response) => {
-            response.json({ version: getPackageVersion() });
+            response.json({ version: (0, utils_1.getPackageVersion)() });
         });
         this.app.get('/api/logs', this.paginatedHandler(this.logBuffer, 'logs'));
         this.app.get('/api/traces', this.paginatedHandler(this.mcpTraceBuffer, 'traces'));
-
         this.app.post('/api/chat-with-agent', async (request, response) => {
-            const body = request.body as {
-                agentModelString?: string;
-                params?: { query?: string };
-            };
+            const body = request.body;
             const agent = body.agentModelString;
             const query = body.params?.query;
             if (!agent || !query) {
@@ -189,87 +189,77 @@ export class FrontendServer {
                 response.status(503).json({ message: 'OpenAI orchestration is not ready.' });
                 return;
             }
-
             try {
                 response.json(await this.llmOrchestrator.chatWithAgent(agent, query));
-            } catch (error) {
+            }
+            catch (error) {
                 this.logger.error({ err: error, agent }, 'UI agent chat failed.');
                 response.status(502).json({
-                    message: error instanceof Error ? redactText(error.message) : 'Agent request failed.',
+                    message: error instanceof Error ? (0, redaction_1.redactText)(error.message) : 'Agent request failed.',
                 });
             }
         });
     }
-
-    private setupWebSockets(): void {
+    setupWebSockets() {
         this.wss.on('connection', (socket) => {
             socket.send(JSON.stringify({ type: 'info', message: 'Connected to mcp-agentify.' }));
         });
     }
-
-    private isAllowedWebSocketRequest(origin: string | undefined, host: string | undefined): boolean {
+    isAllowedWebSocketRequest(origin, host) {
         return Boolean(origin && this.isAllowedDashboardOrigin(origin, host));
     }
-
-    private isAllowedDashboardHost(host: string | undefined): boolean {
-        if (!host) return false;
+    isAllowedDashboardHost(host) {
+        if (!host)
+            return false;
         try {
             const parsedHost = new URL(`http://${host}`);
             const allowedHostname = parsedHost.hostname === '127.0.0.1' || parsedHost.hostname === 'localhost';
-            return (
-                allowedHostname &&
+            return (allowedHostname &&
                 !parsedHost.username &&
                 !parsedHost.password &&
-                Number(parsedHost.port || '80') === this.port
-            );
-        } catch {
+                Number(parsedHost.port || '80') === this.port);
+        }
+        catch {
             return false;
         }
     }
-
-    private isAllowedDashboardOrigin(origin: string, host: string | undefined): boolean {
-        if (!this.isAllowedDashboardHost(host)) return false;
+    isAllowedDashboardOrigin(origin, host) {
+        if (!this.isAllowedDashboardHost(host))
+            return false;
         try {
             const parsedOrigin = new URL(origin);
             const parsedHost = new URL(`http://${host}`);
-            return (
-                parsedOrigin.protocol === 'http:' &&
+            return (parsedOrigin.protocol === 'http:' &&
                 parsedOrigin.hostname === parsedHost.hostname &&
-                Number(parsedOrigin.port || '80') === this.port
-            );
-        } catch {
+                Number(parsedOrigin.port || '80') === this.port);
+        }
+        catch {
             return false;
         }
     }
-
-    private createLogStream(): Writable {
-        return new Writable({
+    createLogStream() {
+        return new node_stream_1.Writable({
             write: (chunk, _encoding, callback) => {
                 for (const line of String(chunk).split('\n')) {
                     if (!line.trim()) {
                         continue;
                     }
                     try {
-                        const logObject = JSON.parse(line) as Record<string, unknown>;
-                        const entry: LogEntry = {
+                        const logObject = JSON.parse(line);
+                        const entry = {
                             timestamp: typeof logObject.time === 'number' ? logObject.time : Date.now(),
                             level: this.pinoLevelToName(logObject.level),
-                            message: typeof logObject.msg === 'string' ? redactText(logObject.msg) : 'Log entry',
-                            details: redactValue(
-                                Object.fromEntries(
-                                    Object.entries(logObject).filter(
-                                        ([key]) => !['time', 'level', 'msg'].includes(key),
-                                    ),
-                                ),
-                            ),
+                            message: typeof logObject.msg === 'string' ? (0, redaction_1.redactText)(logObject.msg) : 'Log entry',
+                            details: (0, redaction_1.redactValue)(Object.fromEntries(Object.entries(logObject).filter(([key]) => !['time', 'level', 'msg'].includes(key)))),
                         };
                         this.pushBounded(this.logBuffer, entry);
                         this.broadcast({ type: 'log_entry', payload: entry });
-                    } catch {
-                        const entry: LogEntry = {
+                    }
+                    catch {
+                        const entry = {
                             timestamp: Date.now(),
                             level: 'INFO',
-                            message: redactText(line),
+                            message: (0, redaction_1.redactText)(line),
                         };
                         this.pushBounded(this.logBuffer, entry);
                     }
@@ -278,14 +268,10 @@ export class FrontendServer {
             },
         });
     }
-
-    private paginatedHandler<T>(items: T[], propertyName: string): RequestHandler {
+    paginatedHandler(items, propertyName) {
         return (request, response) => {
             const page = Math.max(0, Number.parseInt(String(request.query.page || '0'), 10) || 0);
-            const pageSize = Math.min(
-                500,
-                Math.max(1, Number.parseInt(String(request.query.pageSize || '100'), 10) || 100),
-            );
+            const pageSize = Math.min(500, Math.max(1, Number.parseInt(String(request.query.pageSize || '100'), 10) || 100));
             const end = Math.max(0, items.length - page * pageSize);
             const start = Math.max(0, end - pageSize);
             response.json({
@@ -296,29 +282,33 @@ export class FrontendServer {
             });
         };
     }
-
-    private pinoLevelToName(level: unknown): LogEntry['level'] {
-        if (typeof level !== 'number' || level <= 10) return 'TRACE';
-        if (level <= 20) return 'DEBUG';
-        if (level <= 30) return 'INFO';
-        if (level <= 40) return 'WARN';
-        if (level <= 50) return 'ERROR';
+    pinoLevelToName(level) {
+        if (typeof level !== 'number' || level <= 10)
+            return 'TRACE';
+        if (level <= 20)
+            return 'DEBUG';
+        if (level <= 30)
+            return 'INFO';
+        if (level <= 40)
+            return 'WARN';
+        if (level <= 50)
+            return 'ERROR';
         return 'FATAL';
     }
-
-    private pushBounded<T>(items: T[], item: T): void {
+    pushBounded(items, item) {
         if (items.length >= MAX_BUFFER_SIZE) {
             items.shift();
         }
         items.push(item);
     }
-
-    private broadcast(message: object): void {
+    broadcast(message) {
         const serialized = JSON.stringify(message);
         for (const client of this.wss.clients) {
-            if (client.readyState === WebSocket.OPEN) {
+            if (client.readyState === ws_1.WebSocket.OPEN) {
                 client.send(serialized);
             }
         }
     }
 }
+exports.FrontendServer = FrontendServer;
+//# sourceMappingURL=frontendServer.js.map

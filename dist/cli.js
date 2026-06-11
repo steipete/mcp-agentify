@@ -1,74 +1,122 @@
 #!/usr/bin/env node
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// src/cli.ts
-require("dotenv/config"); // Load .env file at the very top
+require("dotenv/config");
+const node_fs_1 = require("node:fs");
+const node_path_1 = require("node:path");
 const server_1 = require("./server");
-const logger_1 = require("./logger");
-// Initialize a basic logger early for CLI messages before full server init
-// The final logger configuration (level, etc.) will be set during the MCP 'initialize' handshake.
-const preliminaryLogLevel = process.env.LOG_LEVEL || 'info';
-const cliLogger = (0, logger_1.initializeLogger)({ logLevel: preliminaryLogLevel });
-async function main() {
-    cliLogger.info('Starting mcp-agentify CLI...');
-    const initialCliOptions = {};
-    if (process.env.LOG_LEVEL) {
-        initialCliOptions.logLevel = process.env.LOG_LEVEL;
-    }
-    if (process.env.DEBUG_PORT) {
-        const port = Number.parseInt(process.env.DEBUG_PORT, 10);
-        if (!Number.isNaN(port) && port > 0) {
-            initialCliOptions.DEBUG_PORT = port;
+const schemas_1 = require("./schemas");
+const utils_1 = require("./utils");
+function usage() {
+    return `mcp-agentify ${(0, utils_1.getPackageVersion)()}
+
+Usage:
+  mcp-agentify --config <path> [--frontend-port <port>|--no-ui] [--model <model>]
+
+Environment:
+  OPENAI_API_KEY         Required OpenAI API key
+  OPENAI_BASE_URL        Optional OpenAI-compatible API base URL
+  OPENAI_MODEL           Overrides config openaiModel
+  MCP_AGENTIFY_CONFIG    Default config path
+  FRONTEND_PORT          Overrides config frontendPort; use "disabled" to disable
+  LOG_LEVEL              Overrides config logLevel
+  AGENTS                 Comma-separated openai/<model> entries for UI chat
+`;
+}
+function parseArguments(argv) {
+    const parsed = { help: false, version: false };
+    for (let index = 0; index < argv.length; index += 1) {
+        const argument = argv[index];
+        if (argument === '--help' || argument === '-h') {
+            parsed.help = true;
+        }
+        else if (argument === '--version' || argument === '-v') {
+            parsed.version = true;
+        }
+        else if (argument === '--config') {
+            parsed.configPath = argv[++index];
+        }
+        else if (argument === '--frontend-port') {
+            const port = Number.parseInt(argv[++index] || '', 10);
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                throw new Error('--frontend-port must be an integer between 1 and 65535.');
+            }
+            parsed.frontendPort = port;
+        }
+        else if (argument === '--no-ui') {
+            parsed.frontendPort = null;
+        }
+        else if (argument === '--model') {
+            parsed.model = argv[++index];
+        }
+        else {
+            throw new Error(`Unknown argument: ${argument}`);
         }
     }
-    // OPENAI_API_KEY from .env will be read by GatewayOptionsSchema in onInitialize if not provided by client.
-    // Or, we can pass it here if we want .env to be a direct override for initialCliOptions.
-    // Spec 6. API Key Priority: process.env.OPENAI_API_KEY > initializationOptions.OPENAI_API_KEY.
-    // This means the server logic (onInitialize) should prioritize env if it reads it.
-    // For now, pass it if present in env, to make it available to the merge logic in onInitialize.
-    if (process.env.OPENAI_API_KEY) {
-        initialCliOptions.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    }
-    cliLogger.debug({ initialCliOptionsFromEnv: initialCliOptions }, 'Initial CLI options prepared from environment.');
-    await (0, server_1.startAgentifyServer)(initialCliOptions);
-    // Note: At this point, startAgentifyServer has set up its own listeners within server.ts.
-    // The listeners below are for the entire CLI process.
+    return parsed;
 }
-// Register process-wide event handlers *outside* main, so they are always active.
-process.on('uncaughtException', (error) => {
-    // Use getLogger() for consistent logging, fallback to cliLogger if main logger isn't set.
-    const logger = (0, logger_1.getLogger)() || cliLogger;
-    logger.fatal({ err: error, exceptionType: 'uncaughtException' }, 'Unhandled Exception at top level. Forcing exit.');
-    // Attempt to perform any critical synchronous cleanup if possible, but expect exit.
-    // Avoid async operations here as the process state is unstable.
-    process.exit(1);
-});
-process.on('unhandledRejection', (reason, promise) => {
-    const logger = (0, logger_1.getLogger)() || cliLogger;
-    let errorToLog = reason;
-    if (reason instanceof Error) {
-        errorToLog = { message: reason.message, stack: reason.stack, name: reason.name };
+function resolveConfigPath(cliPath) {
+    const configuredPath = cliPath || process.env.MCP_AGENTIFY_CONFIG;
+    if (configuredPath) {
+        return (0, node_path_1.resolve)(configuredPath);
     }
-    logger.fatal({ err: errorToLog, promiseDetails: promise, exceptionType: 'unhandledRejection' }, 'Unhandled Rejection at top level. Forcing exit.');
-    process.exit(1);
-});
-process.on('SIGINT', () => {
-    const logger = (0, logger_1.getLogger)() || cliLogger;
-    logger.info('Received SIGINT signal. Attempting graceful shutdown...');
-    // The server.ts connection.onClose and onNotification('exit') should handle backendManager shutdown.
-    // Exiting here will trigger stream closures, which should propagate.
-    process.exit(0);
-});
-process.on('SIGTERM', () => {
-    const logger = (0, logger_1.getLogger)() || cliLogger;
-    logger.info('Received SIGTERM signal. Attempting graceful shutdown...');
-    process.exit(0);
-});
+    const defaultPath = (0, node_path_1.resolve)(process.cwd(), 'mcp-agentify.json');
+    if ((0, node_fs_1.existsSync)(defaultPath)) {
+        return defaultPath;
+    }
+    throw new Error('No config file found. Pass --config <path> or set MCP_AGENTIFY_CONFIG.');
+}
+function parseFrontendPort(value) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value.toLowerCase() === 'disabled') {
+        return null;
+    }
+    const port = Number.parseInt(value, 10);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error('FRONTEND_PORT must be an integer between 1 and 65535, or "disabled".');
+    }
+    return port;
+}
+async function main() {
+    const cli = parseArguments(process.argv.slice(2));
+    if (cli.help) {
+        process.stdout.write(usage());
+        return;
+    }
+    if (cli.version) {
+        process.stdout.write(`${(0, utils_1.getPackageVersion)()}\n`);
+        return;
+    }
+    const configPath = resolveConfigPath(cli.configPath);
+    const fileConfig = schemas_1.GatewayFileConfigSchema.parse(JSON.parse((0, node_fs_1.readFileSync)(configPath, 'utf8')));
+    const environmentFrontendPort = parseFrontendPort(process.env.FRONTEND_PORT);
+    const agents = process.env.AGENTS
+        ? process.env.AGENTS.split(',')
+            .map((agent) => agent.trim())
+            .filter(Boolean)
+        : fileConfig.agents;
+    const frontendPort = cli.frontendPort !== undefined
+        ? cli.frontendPort
+        : environmentFrontendPort !== undefined
+            ? environmentFrontendPort
+            : fileConfig.frontendPort;
+    const options = schemas_1.GatewayOptionsSchema.parse({
+        ...fileConfig,
+        configPath,
+        openaiApiKey: process.env.OPENAI_API_KEY,
+        openaiBaseUrl: process.env.OPENAI_BASE_URL,
+        openaiModel: cli.model || process.env.OPENAI_MODEL || fileConfig.openaiModel,
+        logLevel: process.env.LOG_LEVEL || fileConfig.logLevel,
+        frontendPort,
+        agents,
+    });
+    await (0, server_1.startAgentifyServer)(options);
+}
 main().catch((error) => {
-    const loggerToUse = (0, logger_1.getLogger)() || cliLogger;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    // This catch is for errors specifically from the main() async function execution itself.
-    loggerToUse.fatal({ err: error, rawErrorMessage: errorMessage }, 'mcp-agentify CLI failed during main() execution.');
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`mcp-agentify: ${message}\n`);
     process.exit(1);
 });
 //# sourceMappingURL=cli.js.map

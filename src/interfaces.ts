@@ -1,74 +1,56 @@
-import type { MessageConnection } from 'vscode-jsonrpc/node';
-import type { ChildProcess } from 'node:child_process';
-
-// Import actual Zod-inferred types from schemas.ts
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import type {
-    BackendConfig as ZodBackendConfig,
-    Plan as ZodPlan,
-    GatewayOptions as ZodGatewayOptions,
-    BackendStdioConfig as ZodBackendStdioConfig,
-    OrchestrationContext as ZodOrchestrationContext,
     AgentifyOrchestrateTaskParams as ZodAgentifyOrchestrateTaskParams,
-    LLMGeneratedArguments as ZodLLMGeneratedArguments,
+    BackendConfig as ZodBackendConfig,
+    BackendStdioConfig as ZodBackendStdioConfig,
+    GatewayOptions as ZodGatewayOptions,
+    OrchestrationContext as ZodOrchestrationContext,
+    Plan as ZodPlan,
 } from './schemas';
 
-// --- Gateway & Backend Configuration Types (Re-exporting from schemas) --- //
 export type BackendStdioConfig = ZodBackendStdioConfig;
 export type BackendConfig = ZodBackendConfig;
 export type GatewayOptions = ZodGatewayOptions;
-
-// --- Orchestration & LLM Types (Re-exporting from schemas) --- //
 export type OrchestrationContext = ZodOrchestrationContext;
 export type AgentifyOrchestrateTaskParams = ZodAgentifyOrchestrateTaskParams;
-export type LLMGeneratedArguments = ZodLLMGeneratedArguments;
-export type Plan = ZodPlan; // Note: LLMPlanSchema in schemas.ts infers to type 'Plan'
+export type Plan = ZodPlan;
 
-// --- Other Supporting Interfaces (Defined directly here) --- //
+export interface BackendTool {
+    backendId: string;
+    backendDisplayName: string;
+    name: string;
+    title?: string;
+    description?: string;
+    inputSchema: Tool['inputSchema'];
+    annotations?: Tool['annotations'];
+}
 
 export interface BackendInstance {
     id: string;
-    config: BackendConfig; // Now uses the imported Zod-inferred type
-    connection: MessageConnection;
-    process?: ChildProcess;
+    config: BackendConfig;
+    client: Client;
+    transport: StdioClientTransport;
+    tools: BackendTool[];
     isReady: boolean;
+    error?: string;
 }
 
-export interface OpenAIFunctionParameters {
-    type: 'object';
-    properties: {
-        mcp_method: { type: 'string'; description: string };
-        mcp_params: { type: 'object'; description: string };
-    };
-    required: ['mcp_method', 'mcp_params'];
-}
-
-export interface OpenAIToolFunction {
-    name: string;
-    description: string;
-    parameters: OpenAIFunctionParameters;
-}
-
-export interface OpenAITool {
-    type: 'function';
-    function: OpenAIToolFunction;
-}
+export type BackendToolResult = CallToolResult;
 
 export interface LogEntry {
     timestamp: number;
     level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'TRACE' | 'FATAL';
     message: string;
-
-    details?: any;
+    details?: unknown;
 }
 
 export interface McpTraceEntry {
     timestamp: number;
     direction: 'INCOMING_TO_GATEWAY' | 'OUTGOING_FROM_GATEWAY';
     backendId?: string;
-    id?: string | number;
     method: string;
-
-    paramsOrResult?: any;
-
-    error?: any;
+    paramsOrResult?: unknown;
+    error?: unknown;
 }

@@ -14,13 +14,6 @@
         "jsx": "react-jsx",
         "jsxImportSource": "preact"
     },
-    "include": [
-        "src/**/*",
-        "frontend/src/**/*"
-    ],
-    "exclude": [
-        "node_modules",
-        "dist",
-        "frontend/public"
-    ]
+    "include": ["src/**/*", "frontend/src/**/*", "tests/**/*"],
+    "exclude": ["node_modules", "dist", "frontend/public"]
 }

@@ -1,368 +1,141 @@
 # mcp-agentify
 
-AI-Powered MCP Gateway for Tool Orchestration
+AI-powered MCP gateway that discovers tools from backend MCP servers and routes each natural-language request to one backend tool.
 
-## Overview
+> Experimental. The npm package is `@steipete/mcp-agentify`. The unscoped `mcp-agentify` package belongs to an unrelated project.
 
-`mcp-agentify` is a Node.js/TypeScript application acting as an AI-Powered MCP (Model Context Protocol) Gateway. This Gateway will:
-- Function as an MCP server, primarily communicating via `stdio`.
-- Accept requests from a client IDE (e.g., Cursor) through a primary MCP method: `agentify/orchestrateTask`.
-- Utilize OpenAI's API (specifically Tool Calling) to interpret user queries and context, select appropriate backend MCP tools, and formulate the MCP calls.
-- Dynamically manage `stdio`-based connections to backend MCP servers.
-- Proxy MCP calls to chosen backends and return responses.
-- Be runnable via `npx` or as a dependency.
+## Requirements
 
-## Features
+- Node.js 20.19 or newer
+- An OpenAI API key
+- At least one stdio MCP backend
 
-- **Unified MCP Endpoint:** Provides a single MCP server endpoint for client applications.
-- **Intelligent Task Orchestration:** Uses OpenAI (e.g., GPT-4 Turbo) to understand natural language and select from configured backend tools.
-- **Dynamic Backend Management:** Configure backend MCP servers (like `@modelcontextprotocol/server-filesystem`, `@browserbasehq/mcp-browserbase`) via `initializationOptions`.
-- **Simplified Client Logic:** Centralizes tool selection and MCP call formulation.
-- **Stdio Communication:** Designed for easy integration with IDEs and other tools via standard I/O.
-- **Optional Frontend UI:** For observing logs, traces, and status.
+## Install
 
-## Installation
-
-Requires Node.js 20.19 or later in the 20.x line, or Node.js 22.12 and later.
-
-As a dependency in your project:
 ```bash
-npm install mcp-agentify
-# or
-yarn add mcp-agentify
+npm install --global @steipete/mcp-agentify
 ```
 
-To run globally using npx (once published):
-```bash
-npx mcp-agentify
-```
+The installed command remains `mcp-agentify`.
 
-## Configuration
+## Configure
 
-`mcp-agentify` is configured through a combination of environment variables (often set via a `.env` file for local development or an `env` block in an IDE's server configuration) and `initializationOptions` provided by the connecting MCP client during the `initialize` handshake.
+Create `mcp-agentify.json`:
 
-**Priority of Core Settings (for `mcp-agentify` itself):**
-1.  **Environment Variables:** `OPENAI_API_KEY`, `LOG_LEVEL`, `FRONTEND_PORT` set in `mcp-agentify`'s own execution environment (e.g., from `.env` or IDE's `env` block for the server process) take highest precedence. This allows the Frontend Server to start immediately.
-    *   `FRONTEND_PORT="disabled"`: If `FRONTEND_PORT` is set to the exact string `"disabled"`, the Frontend Server will not be started.
-2.  **`initializationOptions` from Client:** These same keys can be provided by the client as fallbacks if not set in the environment.
-3.  **Internal Defaults:** (e.g., `logLevel` defaults to 'info').
-
-### 1. Environment Variables (`.env` file or IDE `env` block)
-
-This is the **recommended way** to set `OPENAI_API_KEY`, `LOG_LEVEL`, and `FRONTEND_PORT` for `mcp-agentify`'s own operation.
-
-**Example `.env` file (for local `scripts/dev.sh` or `npm run dev`):**
-```env
-OPENAI_API_KEY=sk-YourOpenAIKeyHereFromDotEnv
-LOG_LEVEL=debug
-FRONTEND_PORT=3030
-# To disable the Frontend UI server, uncomment the next line:
-# FRONTEND_PORT="disabled"
-
-# Optional: Define dynamic agents. Comma-separated list of "Vendor/ModelName".
-# Example: AGENTS="OpenAI/gpt-4.1,OpenAI/o3,Anthropic/claude-3-opus"
-# This will expose MCP methods like: agentify/agent_OpenAI_gpt_4_1, agentify/agent_OpenAI_o3, etc.
-AGENTS="OpenAI/gpt-4.1,OpenAI/o3"
-```
-
-When configuring `mcp-agentify` in an IDE, you'll typically have a way to specify environment variables for the server process. This is where these should go.
-
-### 2. MCP `initialize` Request (`initializationOptions`)
-
-The connecting client (IDE) sends `initializationOptions`. This is **primarily used to define the `backends`** that `mcp-agentify` will orchestrate.
-
-**Example `initializationOptions` (JSON sent by client):**
 ```json
 {
-  "logLevel": "trace",
-  "OPENAI_API_KEY": "sk-ClientProvidedKeyAsFallbackIfEnvNotSet",
-  "FRONTEND_PORT": 3001,
+  "openaiModel": "gpt-4.1-mini",
+  "frontendPort": 3030,
+  "agents": ["openai/gpt-4.1-mini"],
   "backends": [
     {
       "id": "filesystem",
-      "displayName": "Local Filesystem Access",
+      "displayName": "Workspace files",
       "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/Users/Shared/Projects",
-        "/tmp/agentify-work"
-      ],
-      "env": {
-        "FILESYSTEM_LOG_LEVEL": "debug"
-      }
+        "@modelcontextprotocol/server-filesystem@2026.1.14",
+        "/absolute/path/to/allowed/files"
+      ]
     },
     {
-      "id": "mcpBrowserbase",
-      "displayName": "Cloud Browser (Browserbase)",
+      "id": "browserbase",
+      "displayName": "Browserbase",
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "@smithery/cli@latest",
-        "run",
-        "@browserbasehq/mcp-browserbase",
-        "--key", "bb_api_YOUR_KEY_AS_ARG_FOR_BROWSERBASE"
+      "args": ["-y", "@browserbasehq/mcp@3.0.0"],
+      "inheritEnv": [
+        "BROWSERBASE_API_KEY",
+        "BROWSERBASE_PROJECT_ID",
+        "GEMINI_API_KEY"
       ]
     }
   ]
 }
 ```
-**Key fields in `initializationOptions`:**
-*   `logLevel`, `OPENAI_API_KEY`, `FRONTEND_PORT` (optional fallbacks): As mentioned, `mcp-agentify` prioritizes its own environment variables for these.
-*   `backends` (required, array): Defines the backend MCP servers.
-    *   `id`: Unique identifier (e.g., "filesystem").
-    *   `displayName` (optional): Human-readable name.
-    *   `type`: Must be `"stdio"`.
-    *   `command`: Command to start the backend.
-    *   `args` (optional): Arguments for the command.
-    *   `env` (optional): Environment variables specifically for *this spawned backend process*.
 
-## How to Run & Configure with an MCP Client (IDE)
+Set credentials in the gateway process environment:
 
-Your IDE (e.g., Cursor, Windsurf, Claude Desktop) will launch `mcp-agentify`.
+```bash
+export OPENAI_API_KEY=...
+export BROWSERBASE_API_KEY=...
+export BROWSERBASE_PROJECT_ID=...
+export GEMINI_API_KEY=...
+mcp-agentify --config /absolute/path/to/mcp-agentify.json
+```
 
-### Configuring Your IDE
+`inheritEnv` is an explicit allowlist. Backend processes receive a minimal default environment plus only listed variables and configured `env` values. A configured value such as `"TOKEN": "${TOKEN}"` expands from the gateway environment.
 
-You need to tell your IDE:
-1.  **How to start `mcp-agentify`**: This is typically the `command` and `args` (if any), and the `workingDirectory`. For local development, this often points to `bash scripts/dev.sh` or `npm run dev`.
-2.  **Environment Variables for `mcp-agentify`**: Set `OPENAI_API_KEY`, `LOG_LEVEL`, `FRONTEND_PORT` here.
-3.  **`initializationOptions`**: Provide the JSON for `backends` and any fallback settings.
+## MCP client
 
-**Conceptual IDE Configuration Example (e.g., for a `claude_desktop_config.json`-like file):**
+Configure the gateway as a stdio MCP server:
+
 ```json
 {
-  "mcpServers": [
-    {
-      "mcp-agentify": {
-        "type": "stdio",
-        "command": "/Users/steipete/Projects/mcp-agentify/scripts/dev.sh",
-        "env": {
-          "logLevel": "trace",
-          "FRONTEND_PORT": 3030,
-          "OPENAI_API_KEY": "sk-YourOpenAIKeyFromIDESettingsPlaceholder"
-        },
-        "initializationOptions": {
-          "backends": [
-            {
-              "id": "filesystem",
-              "displayName": "Local Filesystem (Agentify)",
-              "type": "stdio",
-              "command": "npx",
-              "args": [
-                "-y",
-                "@modelcontextprotocol/server-filesystem",
-                "${workspaceFolder}"
-              ]
-            },
-            {
-              "id": "mcpBrowserbase",
-              "displayName": "Web Browser (Browserbase via Agentify)",
-              "type": "stdio",
-              "command": "npx",
-              "args": [
-                "-y",
-                "@smithery/cli@latest",
-                "run",
-                "@browserbasehq/mcp-browserbase",
-                "--key",
-                "YOUR_BROWSERBASE_KEY_IF_NEEDED"
-              ]
-            }
-          ]
-        }
+  "mcpServers": {
+    "agentify": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@steipete/mcp-agentify",
+        "--config",
+        "/absolute/path/to/mcp-agentify.json"
+      ],
+      "env": {
+        "OPENAI_API_KEY": "..."
       }
     }
-    // ... other MCP server configurations ...
-  ]
+  }
 }
 ```
-**Key Points for IDE Configuration:**
-*   The IDE's `env` block for the `mcp-agentify` server is crucial for setting its core operational parameters like `OPENAI_API_KEY`, `logLevel`, and `FRONTEND_PORT` (for immediate Frontend UI).
-*   `initializationOptions` is mainly for defining the `backends` array.
-*   Use placeholders like `${workspaceFolder}` if your IDE supports them.
 
-**Local Development Startup Methods (referenced by IDE `command`):**
+The gateway exposes one MCP tool:
 
-*   **`bash scripts/dev.sh`**:
-    *   Recommended for IDEs.
-    *   Uses `nodemon` and `ts-node`.
-    *   Picks up `.env` from `mcp-agentify` project root for `OPENAI_API_KEY`, `LOG_LEVEL`, `FRONTEND_PORT`.
-    *   The IDE's `env` block settings (see example above) would override these if the IDE sets environment variables when launching the script.
-*   **`npm run dev`**:
-    *   Similar to `bash scripts/dev.sh`.
-    *   Also uses `nodemon` and `ts-node`.
-    *   Also respects `.env` and environment variables set by the IDE.
+- `orchestrate_task`: selects and calls exactly one tool discovered from the configured backends.
 
-## Frontend UI
+Multi-step workflows require multiple `orchestrate_task` calls. For example, a Browserbase workflow can call `start`, then `navigate`, then `extract`.
 
-`mcp-agentify` includes an optional Frontend UI, also referred to as the Frontend Server.
+## CLI
 
-### Enabling the Frontend UI
+```text
+mcp-agentify --config <path> [--frontend-port <port>|--no-ui] [--model <model>]
+```
 
-Set the `FRONTEND_PORT` environment variable for `mcp-agentify`. This is best done via:
-1.  A `.env` file in the `mcp-agentify` project root when running locally:
-    ```env
-    FRONTEND_PORT=3030
-    # To disable, set FRONTEND_PORT="disabled"
-    ```
-2.  The `env` block in your IDE's server configuration for `mcp-agentify`.
+Environment overrides:
 
-The Frontend UI will start immediately when `mcp-agentify` launches if `FRONTEND_PORT` is set to a valid number in its environment. If `FRONTEND_PORT` is set to `"disabled"`, the UI server will not start. If provided only as a fallback in `initializationOptions` by a client, it will start after the MCP handshake (unless disabled by an environment variable).
+| Variable | Purpose |
+| --- | --- |
+| `OPENAI_API_KEY` | Required OpenAI credential |
+| `OPENAI_BASE_URL` | Optional OpenAI-compatible base URL |
+| `OPENAI_MODEL` | Override `openaiModel` |
+| `MCP_AGENTIFY_CONFIG` | Default configuration path |
+| `FRONTEND_PORT` | UI port, or `disabled` |
+| `LOG_LEVEL` | Pino log level |
+| `AGENTS` | Comma-separated `openai/<model>` UI agents |
 
-### Accessing the Frontend UI
+## Local UI
 
-Once `mcp-agentify` is running and the Frontend UI is enabled (e.g., `FRONTEND_PORT=3030` in its environment), open:
-`http://localhost:3030` (replace 3030 with your `FRONTEND_PORT` if different)
+Set `frontendPort` or pass `--frontend-port`. The dashboard binds to `127.0.0.1` and shows backend status, redacted logs, MCP traces, configuration, and optional direct OpenAI chat.
 
-### Features
+## Security
 
-The Frontend UI provides the following sections:
-
-*   **Gateway Status:**
-    *   Shows the overall status of the gateway (e.g., running, uptime).
-    *   Lists configured backend MCP servers and their readiness status (e.g., "Filesystem: Ready", "Browserbase: Not Ready").
-*   **Gateway Configuration:**
-    *   Displays the current (sanitized) configuration the gateway is using, including log level, backend definitions, etc. Sensitive information like API keys will be redacted.
-*   **Real-time Logs:**
-    *   Streams logs directly from the gateway in real-time via WebSockets.
-    *   Allows filtering logs by minimum severity level (Trace, Debug, Info, Warn, Error, Fatal).
-    *   Provides an "Auto-scroll" option to keep the latest logs in view.
-    *   Displays log timestamps, levels, messages, and any structured details.
-*   **MCP Traces:**
-    *   Streams MCP messages exchanged between the gateway and backend servers, as well as between the client IDE and the gateway.
-    *   Shows direction (Incoming to Gateway, Outgoing from Gateway), backend ID (if applicable), MCP method, request/response ID, and sanitized parameters or results.
-    *   Also provides an "Auto-scroll" option.
-
-### How it Works
-
-*   The `FrontendServer` component (`src/frontendServer.ts`) serves the static HTML, CSS, and JavaScript files located in `frontend/public/`.
-*   It provides API endpoints (`/api/status`, `/api/config`, `/api/logs`, `/api/mcptrace`) that the frontend JavaScript uses to fetch initial state or paginated historical data (though historical data fetching is not fully implemented in the PoC's UI script).
-*   A WebSocket connection is established between the frontend UI and the `FrontendServer`.
-*   The gateway's main logger (`src/logger.ts`) is configured to pipe log entries (as JSON objects) to the `FrontendServer` if the frontend UI is active.
-*   The `BackendManager` and main server logic (`src/server.ts`) emit MCP trace events.
-*   The `FrontendServer` receives these log entries and trace events and broadcasts them to all connected WebSocket clients (i.e., open frontend UI pages).
-*   The client-side JavaScript (`frontend/src/index.tsx` and components) receives these WebSocket messages and dynamically updates the corresponding sections in the HTML to display the information.
-
-## Local Install and Global Usage (Advanced)
-
-While `npm run dev` is great for active development and `npx mcp-agentify` (once published) is convenient for project-local use, you might want to install `mcp-agentify` globally from your local clone for broader testing or to simulate how a published global package would behave.
-
-### 1. Global Install from Local Clone
-
-After cloning the repository and ensuring all dependencies are installed (`npm install`):
-
-1.  **Navigate to the project root directory:**
-    ```bash
-    cd path/to/mcp-agentify
-    ```
-2.  **Build the project (if you want to install the compiled version):**
-    ```bash
-    npm run build
-    ```
-3.  **Install globally:**
-    To install the current local version globally, use:
-    ```bash
-    npm install -g .
-    ```
-    This command links the current directory (`.`) as a global package. If you've run `npm run build`, it will typically link the compiled version based on your `package.json`'s `bin` and `files` fields.
-
-4.  **Run the globally installed command:**
-    Now you should be able to run `mcp-agentify` from any directory:
-    ```bash
-    mcp-agentify
-    ```
-    The gateway will start and listen on `stdio`.
-
-5.  **Uninstalling:**
-    To remove the global link, you'll typically use the package name defined in `package.json`:
-    ```bash
-    npm uninstall -g @your-scope/mcp-agentify # Replace with actual package name
-    ```
-    If you used a different name or if it was just a link, `npm unlink .` from the project directory might also be needed, or check `npm list -g --depth=0` to find the linked package name.
-
-### 2. Using `npm link` (Recommended for Development)
-
-`npm link` is a more development-friendly way to create a global-like symlink to your local project. This means changes you make to your local code (even without rebuilding, if you run the linked version via `ts-node` or if your IDE points to the source) can be reflected immediately when you run the global command.
-
-1.  **Navigate to the project root directory:**
-    ```bash
-    cd path/to/mcp-agentify
-    ```
-2.  **Create the link:**
-    ```bash
-    npm link
-    ```
-    This creates a global symlink named after your package name (e.g., `mcp-agentify` or `@your-scope/mcp-agentify`) that points to your current project directory.
-
-3.  **Run the linked command:**
-    You can now run `mcp-agentify` (or your package name) from any terminal:
-    ```bash
-    mcp-agentify
-    ```
-    If your `package.json` `bin` points to `dist/cli.js`, you'll need to run `npm run build` for changes to `src` to be reflected in the linked command. If your `bin` could somehow point to a `ts-node` invoker for `src/cli.ts` (more advanced setup), then changes might be live.
-
-4.  **Unlinking:**
-    To remove the symlink:
-    ```bash
-    npm unlink --no-save @your-scope/mcp-agentify # Replace with actual package name
-    # or from the project directory:
-    # npm unlink
-    ```
-
-**Note on `.env` with Global Installs:**
-When running a globally installed or linked `mcp-agentify`, it will look for a `.env` file in the *current working directory* from where you run the command, not necessarily from the `mcp-agentify` project's original root. For consistent behavior, especially with API keys, ensure your `.env` file is in the directory where you execute the `mcp-agentify` command, or configure these settings via `initializationOptions` from your client tool.
+- Restrict filesystem backends to the minimum required directories.
+- Keep credentials in environment variables; do not put them in JSON or command arguments.
+- Only variables listed in `inheritEnv` are forwarded to a backend.
+- Configuration, logs, traces, errors, and backend command arguments are redacted before display.
+- Dashboard HTTP requests require a localhost `Host`; browser origins and WebSockets must be same-origin.
+- The dashboard is local-only and has no authentication. Do not proxy or expose it.
 
 ## Development
 
-1.  Clone the repository: `git clone https://github.com/steipete/mcp-agentify.git`
-2.  Navigate to the project directory: `cd mcp-agentify`
-3.  Install dependencies: `npm install`
-4.  Create a `.env` file in the project root (copy from `.env.example`) and add your `OPENAI_API_KEY`.
-    ```env
-    OPENAI_API_KEY=your_openai_api_key_here
-    LOG_LEVEL=debug
-    FRONTEND_PORT=3030
-    ```
-5.  Run in development mode (with hot reloading):
-    ```bash
-    npm run dev
-    ```
-    This uses `nodemon` and `ts-node` to execute `src/cli.ts`.
-
-## Testing
-
-Run tests with Vitest:
 ```bash
+npm ci
+npm run lint
 npm test
+npm pack --dry-run
 ```
-To run in watch mode:
-```bash
-npm run test:watch
-```
-To get a coverage report:
-```bash
-npm run test:coverage
-```
-(Note: Unit and integration tests are planned under Task 11 and 12 respectively.)
 
-## License
+`npm test` rebuilds the server and packaged UI before running unit and integration tests.
 
-[MIT](LICENSE)
-
-### Dynamic Agent Methods via `AGENTS` Environment Variable
-
-`mcp-agentify` can expose direct agent interaction methods on the fly based on the `AGENTS` environment variable. This is useful for quickly testing different models or providing direct access to specific LLM configurations without defining them as full backend tools.
-
--   Set the `AGENTS` environment variable as a comma-separated string of `"Vendor/ModelName"` pairs.
-    -   **Format:** `AGENTS="Vendor1/ModelNameA,Vendor2/ModelNameB"`
-    -   **Example:** `AGENTS="OpenAI/gpt-4.1,OpenAI/o3"`
-    -   **Note on "OpenAI" vendor:** The vendor name "OpenAI" is treated case-insensitively and will be standardized to lowercase `openai` (e.g., "OPENAI/gpt-4.1" becomes "openai/gpt-4.1"). Other vendor names are case-sensitive.
-    -   (Ensure the model names are valid for the specified vendor, e.g., as per OpenAI API documentation for `gpt-4.1`, `o3`, etc.)
--   For each entry, `mcp-agentify` will register an MCP method:
-    -   The `Vendor/ModelName` string is sanitized (non-alphanumerics, including `/`, become `_`).
-    -   The method will be named `agentify/agent_<sanitized_Vendor_ModelName>`.
-    -   **Example:** `AGENTS="OpenAI/gpt-4.1"` creates `agentify/agent_OpenAI_gpt_4_1`.
--   These methods currently accept a `{ query: string, context?: OrchestrationContext }` payload and return a placeholder response.
-    Full LLM interaction logic for these dynamic agents will be implemented in the future.
+See [API](docs/api.md), [examples](docs/examples.md), and [release notes](docs/release.md).

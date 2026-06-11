@@ -1,40 +1,21 @@
-// tests/integration/mock-backends/browserbase-mock.js
-// A very simple mock MCP server for browserbase operations (CommonJS)
-const rpc = require('vscode-jsonrpc/node');
-console.error('[browserbase-mock.js] ALIVE AND STARTING'); // Log on start
+const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { z } = require('zod/v4');
 
-const connection = rpc.createMessageConnection(process.stdin, process.stdout);
+const server = new McpServer({ name: 'browserbase-mock', version: '1.0.0' });
 
-connection.onRequest('initialize', (params) => {
-  console.error(`[browserbase-mock.js] Received 'initialize', params: ${JSON.stringify(params)}. Responding...`);
-  return { capabilities: {} };
+server.registerTool(
+  'navigate',
+  {
+    description: 'Navigate a browser session to a URL.',
+    inputSchema: { url: z.string().url() },
+  },
+  async ({ url }) => ({
+    content: [{ type: 'text', text: JSON.stringify({ url, title: 'Mock Page Title' }) }],
+  }),
+);
+
+server.connect(new StdioServerTransport()).catch((error) => {
+  console.error(error);
+  process.exit(1);
 });
-
-connection.onRequest('browser/loadUrl', (params) => {
-  console.error(`[browserbase-mock.js] Received 'browser/loadUrl', params: ${JSON.stringify(params)}. Responding...`);
-  if (params && params.url && params.url.includes('example.com')) {
-    return { sessionId: 'mockSession123', title: 'Mock Page Title' };
-  }
-  return rpc.ResponseError(rpc.ErrorCodes.InvalidParams, 'URL not supported by mock');
-});
-
-connection.onRequest('browser/extractText', (params) => {
-    // console.error(`[browserbase-mock] Received browser/extractText with params: ${JSON.stringify(params)}`);
-    if (params && params.sessionId === 'mockSession123') {
-        return { text: "Mocked webpage text content from example.com" };
-    }
-    return { text: "Session not found or no content for this mock session." };
-});
-
-connection.onNotification('shutdown', () => {
-  console.error('[browserbase-mock.js] Received shutdown');
-  connection.dispose();
-});
-
-connection.onNotification('exit', () => {
-  console.error('[browserbase-mock.js] Received exit, exiting process.');
-  process.exit(0);
-});
-
-console.error('[browserbase-mock.js] Listening for MCP messages...');
-connection.listen(); 

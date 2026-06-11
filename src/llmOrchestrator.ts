@@ -1,338 +1,179 @@
+import { createHash } from 'node:crypto';
 import OpenAI, { APIError } from 'openai';
-import type { Logger as PinoLoggerBase } from 'pino';
-import { PinoLogLevel } from './logger';
-import type { BackendConfig, OrchestrationContext, Plan, BackendStdioConfig } from './interfaces';
-import { LLMGeneratedArgumentsSchema, LLMPlanSchema } from './schemas';
-// OrchestrationContext, Plan, LLMGeneratedArgumentsSchema, LLMPlanSchema will be used in later subtasks.
+import type { Logger } from 'pino';
+import type { BackendTool, OrchestrationContext, Plan } from './interfaces';
+import type { PinoLogLevel } from './logger';
+import { redactText } from './redaction';
+import { LLMPlanSchema } from './schemas';
+
+interface ToolTarget {
+    backendId: string;
+    toolName: string;
+}
+
+export interface AgentChatResult {
+    message: string;
+    model: string;
+}
+
+function createFunctionName(tool: BackendTool, existingNames: Set<string>): string {
+    const rawName = `${tool.backendId}__${tool.name}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (rawName.length <= 64 && !existingNames.has(rawName)) {
+        return rawName;
+    }
+
+    const suffix = createHash('sha256').update(`${tool.backendId}\0${tool.name}`).digest('hex').slice(0, 8);
+    return `${rawName.slice(0, 55)}_${suffix}`;
+}
 
 export class LLMOrchestratorService {
-    private openai: OpenAI;
-    private logger: PinoLoggerBase<PinoLogLevel>;
-    private availableToolsForLLM: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
+    private readonly openai: OpenAI;
+    private readonly logger: Logger<PinoLogLevel>;
+    private readonly model: string;
+    private tools: OpenAI.Chat.Completions.ChatCompletionTool[];
+    private readonly toolTargets = new Map<string, ToolTarget>();
 
-    constructor(apiKey: string, backendConfigs: BackendConfig[], logger: PinoLoggerBase<PinoLogLevel>) {
-        if (!apiKey) {
-            // Logger might not be initialized yet if this constructor is called before logger.ts is ready
-            // However, logger is passed in, so it should be available.
-            logger.error('OpenAI API key is required for LLMOrchestratorService but was not provided.');
-            throw new Error('OpenAI API key is required for LLMOrchestratorService.');
-        }
+    constructor(
+        apiKey: string,
+        model: string,
+        backendTools: BackendTool[],
+        logger: Logger<PinoLogLevel>,
+        baseURL?: string,
+    ) {
         this.logger = logger.child({ component: 'LLMOrchestratorService' });
+        this.model = model;
+        this.openai = new OpenAI({ apiKey, baseURL });
 
-        try {
-            this.openai = new OpenAI({
-                apiKey: apiKey,
-                // Default timeout and retry settings from the library are generally good for PoC.
-                // maxRetries: 2, // Example: Customize if needed
-                // timeout: 60 * 1000, // 60 seconds (default is 10 minutes)
-            });
-            this.logger.info('OpenAI client initialized successfully.');
-        } catch (error: unknown) {
-            let errorMsg = 'Unknown error during OpenAI client init';
-            if (error instanceof Error) errorMsg = error.message;
-            this.logger.error({ err: error, rawErrorMsg: errorMsg }, 'Failed to initialize OpenAI client');
-            throw error;
-        }
+        const functionNames = new Set<string>();
+        this.tools = backendTools.map((tool) => {
+            const functionName = createFunctionName(tool, functionNames);
+            functionNames.add(functionName);
+            this.toolTargets.set(functionName, { backendId: tool.backendId, toolName: tool.name });
 
-        this.generateOpenAITools(backendConfigs);
-    }
-
-    /**
-     * Generates OpenAI tool definitions from backend configurations as per spec.md.
-     * @param backendConfigs - Array of backend configurations.
-     */
-    private generateOpenAITools(backendConfigs: BackendConfig[]): void {
-        this.availableToolsForLLM = []; // Clear any existing tools
-        if (!backendConfigs || backendConfigs.length === 0) {
-            this.logger.warn(
-                'generateOpenAITools called with no backend configurations. No tools will be available to the LLM.',
-            );
-            return;
-        }
-
-        // Type parameters as Record<string, unknown> which is compatible with OpenAI's FunctionParameters
-        const standardToolParameters: Record<string, unknown> = {
-            type: 'object',
-            properties: {
-                mcp_method: {
-                    type: 'string',
-                    description: 'The specific MCP method to invoke on the selected backend service.',
-                },
-                mcp_params: {
-                    type: 'object',
-                    description:
-                        'A key-value object containing parameters for the mcp_method. Structure varies by method.',
-                },
-            },
-            required: ['mcp_method', 'mcp_params'],
-        };
-
-        for (const config of backendConfigs) {
-            // spec.md states function.name MUST be backendConfig.id
-            const toolName = config.id;
-            let toolDescription = '';
-
-            // Use descriptions from spec.md section 7
-            // This mapping should ideally be more robust if many tools are expected.
-            switch (toolName) {
-                case 'filesystem':
-                    toolDescription =
-                        "Handles local filesystem operations like reading/writing files, listing directories, creating/deleting within pre-configured accessible paths. Use context like `currentWorkingDirectory` or `activeDocumentURI` to resolve relative paths if a query implies it. Key methods: 'fs/readFile' (params: {path: string}), 'fs/writeFile' (params: {path: string, content: string}), 'fs/readdir' (params: {path: string}), 'fs/mkdir' (params: {path: string}), 'fs/rm' (params: {path: string, recursive?: boolean}). Paths should typically be absolute or be resolvable using provided context within the allowed mounted points.";
-                    break;
-                case 'mcpBrowserbase': // As per spec.md example initializationOptions
-                    toolDescription =
-                        "Controls a cloud browser (Browserbase) for web interactions. Can load URLs, take screenshots, extract text or HTML, and run JavaScript on pages. Useful for web scraping, fetching live web content, or simple web automation. Context can inform URLs or search queries. Key methods: 'browser/loadUrl' (params: {url: string}), 'browser/screenshot' (params: {sessionId?: string, format?: \'png\'|\'jpeg\'}), 'browser/extractText' (params: {sessionId?: string}), 'browser/extractHtml' (params: {sessionId?: string}). A session is typically initiated by 'browser/loadUrl'.";
-                    break;
-                default: {
-                    this.logger.warn(
-                        { backendId: toolName, backendType: (config as BackendStdioConfig).type },
-                        `No specific description found for tool ID '${toolName}'. Using a generic description. Please update spec.md or this mapping.`,
-                    );
-                    // Use displayName from config if available, otherwise id itself for a generic description
-                    const displayName = (config as BackendStdioConfig).displayName || toolName;
-                    toolDescription = `Interface to the ${displayName} backend service. Provide mcp_method and mcp_params to interact.`;
-                    break; // Good practice to have a break in default too, though logically last here.
-                }
-            }
-
-            // Infer the type for toolFunction from the ChatCompletionTool type
-            const toolFunction: OpenAI.Chat.Completions.ChatCompletionTool['function'] = {
-                name: toolName,
-                description: toolDescription,
-                parameters: standardToolParameters, // Assign the Record<string, unknown> object
-            };
-
-            const tool: OpenAI.Chat.Completions.ChatCompletionTool = {
+            return {
                 type: 'function',
-                function: toolFunction,
+                function: {
+                    name: functionName,
+                    description: [
+                        `Backend: ${tool.backendDisplayName}.`,
+                        tool.description || `Call the ${tool.name} MCP tool.`,
+                    ].join(' '),
+                    parameters: tool.inputSchema,
+                },
             };
-            this.availableToolsForLLM.push(tool);
-            this.logger.debug({ toolName: tool.function.name }, 'Generated OpenAI tool definition');
-        }
-        this.logger.info({ count: this.availableToolsForLLM.length }, 'OpenAI tool definitions generated.');
+        });
     }
 
-    // orchestrate method will be implemented in Subtask 5.3
-    // Getter for testing or other internal uses if necessary
-    public getAvailableTools(): OpenAI.Chat.Completions.ChatCompletionTool[] {
-        return this.availableToolsForLLM;
+    public getAvailableToolCount(): number {
+        return this.tools.length;
     }
 
-    public async chatWithAgent(
-        agentModelString: string, // Expected format: "Vendor/ModelName", e.g., "OpenAI/gpt-4.1"
-        userQuery: string,
-        context?: OrchestrationContext | null | undefined
-    ): Promise<{ message: string; rawResponse?: OpenAI.Chat.Completions.ChatCompletion; [key: string]: any }> {
-        this.logger.info({ agentModelStringReceived: agentModelString, userQuery, context }, 'Initiating direct chat with agent.');
-
-        let modelToUse = 'gpt-4.1'; // Default model if parsing fails
-        const parts = agentModelString.split('/', 2);
-        let vendor = 'openai'; // Default vendor
-        let modelNameFromInput = agentModelString; // Default if no slash
-
-        if (parts.length === 2) {
-            vendor = parts[0].toLowerCase();
-            modelNameFromInput = parts[1];
-        } else {
-            this.logger.warn({ agentModelString }, `No vendor prefix found in agentModelString. Assuming default vendor 'openai' and model '${modelNameFromInput}'.`);
-        }
-
-        if (vendor === 'openai') {
-            modelToUse = modelNameFromInput;
-            this.logger.info(`Using OpenAI model: ${modelToUse} for agent chat.`);
-        } else {
-            // For non-OpenAI vendors, we'll still try to use modelNameFromInput with the OpenAI client.
-            // This relies on the OpenAI API key/endpoint being able to handle other models (e.g., OpenRouter).
-            modelToUse = modelNameFromInput; // Or potentially the full agentModelString if that's what an OpenRouter-like endpoint expects.
-            this.logger.warn(
-                { agentModelString, resolvedVendor: vendor, modelToAttempt: modelToUse },
-                `Vendor "${vendor}" is not natively "openai". Attempting to use model "${modelToUse}" with the current OpenAI client. Success depends on API key compatibility (e.g., OpenRouter).`
-            );
-        }
-
-        if (!modelToUse || modelToUse.trim() === '') {
-            const errMsg = `After parsing, modelToUse is empty for agentModelString: "${agentModelString}". Falling back to default 'gpt-4.1'.`;
-            this.logger.error({ agentModelString }, errMsg);
-            modelToUse = 'gpt-4.1';
-        }
-
-        const systemPrompt = "You are a helpful AI assistant. Respond directly to the user's query.";
-        let userMessageContent = `User query: "${userQuery}"`;
-        if (context) {
-            userMessageContent += `\n\nRelevant Context:\n${JSON.stringify(context, null, 2)}`;
-        }
-        
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessageContent },
-        ];
-
-        const requestPayload: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
-            model: modelToUse,
-            messages: messages,
-        };
-
-        this.logger.trace({ requestPayload }, 'Sending request to OpenAI API for agent chat.');
-
-        try {
-            const response = await this.openai.chat.completions.create(requestPayload);
-            this.logger.trace({ response }, 'Received response from OpenAI API for agent chat.');
-
-            const assistantMessage = response.choices[0]?.message?.content;
-
-            if (assistantMessage === null || assistantMessage === undefined) { // Check for null or undefined explicitly
-                this.logger.warn({ choice: response.choices[0] }, 'LLM did not return a message content.');
-                // Still return a structured response, but indicate no message
-                return { message: '[No message content received from LLM]', rawResponse: response };
+    public removeBackendTools(backendId: string): void {
+        for (const [functionName, target] of this.toolTargets) {
+            if (target.backendId === backendId) {
+                this.toolTargets.delete(functionName);
             }
-
-            this.logger.info('LLM returned a message for agent chat.');
-            return { message: assistantMessage, rawResponse: response };
-        } catch (apiError: unknown) {
-            let errorMessageForClient = 'An unexpected error occurred while communicating with the AI agent.';
-            if (apiError instanceof APIError) {
-                this.logger.error(
-                    {
-                        errName: apiError.name,
-                        status: apiError.status,
-                        errMessage: apiError.message, // OpenAI specific message
-                        errHeaders: apiError.headers,
-                        modelUsed: modelToUse,
-                    },
-                    'OpenAI API Error during agent chat.',
-                );
-                errorMessageForClient = `OpenAI API Error: ${apiError.message || 'Failed to get response from agent.'}`;
-            } else if (apiError instanceof Error) {
-                this.logger.error({ errMessage: apiError.message, errStack: apiError.stack, modelUsed: modelToUse }, 'Generic error during agent chat.');
-                errorMessageForClient = `Error during agent chat: ${apiError.message}`;
-            } else {
-                this.logger.error({ errorObject: apiError, modelUsed: modelToUse }, 'Unknown error object during agent chat.');
-            }
-            // Instead of returning an error-like object, throw an error that the server can catch
-            // and turn into a ResponseError.
-            throw new Error(errorMessageForClient); 
         }
+        this.tools = this.tools.filter((tool) => this.toolTargets.has(tool.function.name));
     }
 
-    public async orchestrate(query: string, context: OrchestrationContext | null | undefined): Promise<Plan | null> {
-        this.logger.info({ query, context }, 'Orchestrating task based on user query and context.');
-
-        if (this.availableToolsForLLM.length === 0) {
-            this.logger.warn('No tools available for LLM orchestration. Cannot proceed.');
+    public async orchestrate(query: string, context?: OrchestrationContext): Promise<Plan | null> {
+        if (this.tools.length === 0) {
             return null;
         }
 
-        const systemPrompt =
-            "You are an expert AI assistant. Based on the user's query, provided context (such as `currentWorkingDirectory` or `activeDocumentURI`), and available tools, choose exactly one tool to call by specifying its `mcp_method` and `mcp_params`. Use the provided context to inform the parameters if applicable and relevant. If the query is ambiguous, cannot be handled by any tool, or if essential information is missing from the query or context for a tool to operate, you MUST NOT call any tool.";
-        const userMessageContent = `User query: "${query}"\n${context ? `Context: ${JSON.stringify(context)}` : ''}`;
+        const response = await this.createCompletion({
+            model: this.model,
+            messages: [
+                {
+                    role: 'system',
+                    content:
+                        'Choose exactly one available MCP tool that best satisfies the request. ' +
+                        'Use the tool input schema exactly. Do not call a tool when required information is missing.',
+                },
+                {
+                    role: 'user',
+                    content: JSON.stringify({ query, context: context || null }),
+                },
+            ],
+            tools: this.tools,
+            tool_choice: 'auto',
+            parallel_tool_calls: false,
+        });
 
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessageContent },
-        ];
+        const toolCalls = response.choices[0]?.message?.tool_calls;
+        if (!toolCalls || toolCalls.length !== 1 || toolCalls[0].type !== 'function') {
+            this.logger.warn({ toolCallCount: toolCalls?.length || 0 }, 'OpenAI did not select exactly one tool.');
+            return null;
+        }
 
-        const requestPayload: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
-            model: 'gpt-4.1',
-            messages: messages,
-            tools: this.availableToolsForLLM,
-            tool_choice: 'auto' as const,
-        };
+        const toolCall = toolCalls[0].function;
+        const target = this.toolTargets.get(toolCall.name);
+        if (!target) {
+            this.logger.warn({ functionName: toolCall.name }, 'OpenAI selected an unknown generated tool name.');
+            return null;
+        }
 
-        this.logger.trace({ requestPayload }, 'Sending request to OpenAI API for tool call generation.');
-
+        let parsedArguments: unknown;
         try {
-            const response = await this.openai.chat.completions.create(requestPayload);
-            this.logger.trace({ response }, 'Received response from OpenAI API.');
+            parsedArguments = JSON.parse(toolCall.arguments);
+        } catch (error) {
+            this.logger.warn({ err: error }, 'OpenAI returned invalid JSON tool arguments.');
+            return null;
+        }
 
-            const toolCalls = response.choices[0]?.message?.tool_calls;
+        const result = LLMPlanSchema.safeParse({
+            backendId: target.backendId,
+            toolName: target.toolName,
+            arguments: parsedArguments,
+        });
+        if (!result.success) {
+            this.logger.warn({ validationErrors: result.error.format() }, 'OpenAI returned invalid tool arguments.');
+            return null;
+        }
+        return result.data;
+    }
 
-            if (!toolCalls || toolCalls.length === 0) {
-                this.logger.warn({ query, context, choice: response.choices[0] }, 'LLM did not choose any tool.');
-                return null;
-            }
+    public async chatWithAgent(agentModelString: string, userQuery: string): Promise<AgentChatResult> {
+        const [vendor, model] = agentModelString.split('/', 2);
+        if (vendor?.toLowerCase() !== 'openai' || !model) {
+            throw new Error(`Unsupported agent ${agentModelString}. Expected openai/<model>.`);
+        }
 
-            if (toolCalls.length > 1) {
-                this.logger.warn(
-                    { query, context, toolCallsCount: toolCalls.length },
-                    'LLM chose multiple tools. Using only the first one as per PoC spec (one-shot operation).',
-                );
-                // PoC spec implies one-shot, so we take the first.
-            }
+        const response = await this.createCompletion({
+            model,
+            messages: [
+                { role: 'system', content: 'Respond directly and concisely to the user.' },
+                { role: 'user', content: userQuery },
+            ],
+        });
+        const message = response.choices[0]?.message?.content;
+        if (!message) {
+            throw new Error('OpenAI returned no message content.');
+        }
+        return { message, model };
+    }
 
-            const firstToolCall = toolCalls[0];
-            if (firstToolCall.type !== 'function') {
-                this.logger.error(
-                    { toolCallType: firstToolCall.type },
-                    'LLM returned a tool call that is not a function type. Cannot proceed.',
-                );
-                return null;
-            }
-
-            const backendId = firstToolCall.function.name;
-            const argsString = firstToolCall.function.arguments;
-            let parsedArgsJson: unknown;
-            try {
-                parsedArgsJson = JSON.parse(argsString);
-            } catch (parseError: unknown) {
-                let errorMsg = 'Unknown JSON parse error';
-                if (parseError instanceof Error) errorMsg = parseError.message;
-                else if (typeof parseError === 'string') errorMsg = parseError;
-                this.logger.error(
-                    { err: parseError, argsString, rawErrorMsg: errorMsg },
-                    'Failed to parse LLM function arguments JSON string.',
-                );
-                return null;
-            }
-
-            const validatedArgs = LLMGeneratedArgumentsSchema.safeParse(parsedArgsJson);
-            if (!validatedArgs.success) {
-                this.logger.error(
-                    { error: validatedArgs.error.format(), parsedArgsJson },
-                    'LLM generated arguments do not match LLMGeneratedArgumentsSchema.',
-                );
-                return null;
-            }
-
-            const planCandidate: Plan = {
-                backendId: backendId,
-                mcpMethod: validatedArgs.data.mcp_method,
-                mcpParams: validatedArgs.data.mcp_params,
-            };
-
-            // Final validation of the overall plan structure against LLMPlanSchema
-            const validatedPlan = LLMPlanSchema.safeParse(planCandidate);
-            if (!validatedPlan.success) {
-                this.logger.error(
-                    { error: validatedPlan.error.format(), planCandidate },
-                    'Constructed plan does not match LLMPlanSchema.',
-                );
-                return null;
-            }
-
-            this.logger.info({ plan: validatedPlan.data }, 'LLM generated a valid plan.');
-            return validatedPlan.data;
-        } catch (apiError: unknown) {
-            if (apiError instanceof APIError) {
+    private async createCompletion(
+        request: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+    ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+        try {
+            return await this.openai.chat.completions.create(request);
+        } catch (error) {
+            if (error instanceof APIError) {
                 this.logger.error(
                     {
-                        err: apiError,
-                        name: apiError.name,
-                        status: apiError.status,
-                        headers: apiError.headers,
-                        message: apiError.message,
+                        status: error.status,
+                        code: error.code,
+                        requestId: error.request_id,
+                        message: redactText(error.message),
                     },
-                    'OpenAI API Error during tool call generation.',
+                    'OpenAI request failed.',
                 );
             } else {
-                let errorMsg = 'Unknown error during OpenAI API call';
-                if (apiError instanceof Error) errorMsg = apiError.message;
-                else if (typeof apiError === 'string') errorMsg = apiError;
-                this.logger.error(
-                    { err: apiError, rawErrorMsg: errorMsg },
-                    'Non-API error during OpenAI call or processing.',
-                );
+                this.logger.error({ err: error }, 'OpenAI request failed.');
             }
-            return null;
+            throw error;
         }
     }
 }
