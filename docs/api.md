@@ -1,112 +1,89 @@
-# API Documentation
+# MCP API
 
-This document details the Model Context Protocol (MCP) interface provided by `mcp-agentify`.
+`mcp-agentify` is an MCP server over stdio. It uses standard MCP initialization, tool discovery, and tool calls through `@modelcontextprotocol/sdk`.
 
-## MCP Methods
+## `orchestrate_task`
 
-### `initialize`
+Routes a natural-language request to exactly one tool discovered from the configured backend MCP servers.
 
-Initializes the `mcp-agentify` server. The client (e.g., an IDE) sends this request first to configure the gateway, including available backend MCP servers and other operational parameters.
+Input:
 
-**Parameters (`InitializeParams`):**
-
-The `params` object for the `initialize` request should conform to the standard LSP `InitializeParams` structure. The crucial part for `mcp-agentify` is `params.initializationOptions`.
-
-```typescript
-// From vscode-languageserver-protocol
-interface InitializeParams {
-  processId?: number | null;
-  clientInfo?: {
-    name: string;
-    version?: string;
-  } | null;
-  locale?: string;
-  rootPath?: string | null; // Deprecated, use rootUri
-  rootUri: DocumentUri | null;
-  capabilities: ClientCapabilities; // Standard LSP client capabilities
-  initializationOptions?: GatewayOptions; // *** This is key for mcp-agentify ***
-  trace?: 'off' | 'messages' | 'verbose';
-  workspaceFolders?: WorkspaceFolder[] | null;
-}
-
-// Defined in src/interfaces.ts (derived from src/schemas.ts)
-interface GatewayOptions {
-  OPENAI_API_KEY: string; // OpenAI API key (can also be set via .env)
-  backends: BackendConfig[]; // Array of backend MCP server configurations
-  logLevel?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent'; // Optional: desired log level for the gateway
-  FRONTEND_PORT?: number | string | null; // Optional: port for the frontend web interface. Set to "disabled" to prevent the frontend UI server from starting.
-}
-
-// Defined in src/interfaces.ts (derived from src/schemas.ts)
-interface BackendConfig { // For PoC, this is effectively BackendStdioConfig
-  id: string;        // Unique identifier, must match LLM tool name. OpenAI Tool Name compliant (^[a-zA-Z0-9_-]{1,64}$)
-  displayName?: string; // Optional display name for the backend
-  type: "stdio";     // For PoC, only "stdio" is supported
-  command: string;   // Command to launch the backend MCP server (e.g., "npx")
-  args?: string[];    // Arguments for the command
-  env?: Record<string, string>; // Optional environment variables for the backend process
+```json
+{
+  "query": "List the files in /tmp/example",
+  "context": {
+    "activeDocumentURI": "file:///tmp/example/README.md",
+    "currentWorkingDirectory": "/tmp/example",
+    "selectionText": "optional selected text"
+  }
 }
 ```
 
-**Returns (`InitializeResult`):**
+`query` is required. Every `context` field is optional.
 
-Standard LSP `InitializeResult` structure.
+The result is the selected backend tool's standard MCP `CallToolResult`, including its `content`, `structuredContent`, and `isError` fields when provided.
 
-```typescript
-// From vscode-languageserver-protocol
-interface InitializeResult<C extends ServerCapabilities = ServerCapabilities> {
-  capabilities: C;
-  serverInfo?: {
-    name: string;    // e.g., "mcp-agentify"
-    version?: string; // e.g., "0.1.0"
-  };
-}
+If no single tool can satisfy the request, the gateway returns:
 
-// For mcp-agentify, capabilities will be minimal for PoC.
-interface ServerCapabilities { }
-```
-
-### `agentify/orchestrateTask`
-
-This is the primary method for sending tasks to the `mcp-agentify` gateway. The gateway uses an LLM to interpret the query and context, select an appropriate backend tool, and execute the corresponding MCP method on that backend.
-
-**Parameters (`AgentifyOrchestrateTaskParams`):**
-
-```typescript
-// Defined in src/interfaces.ts (derived from src/schemas.ts)
-interface AgentifyOrchestrateTaskParams {
-  query: string; // Natural language query describing the task.
-  context?: {
-    activeDocumentURI?: string | null;        // URI of the currently active document in the IDE.
-    currentWorkingDirectory?: string | null;  // Current working directory of the client/IDE.
-    selectionText?: string | null;            // Currently selected text in the IDE.
-  } | null;
+```json
+{
+  "isError": true,
+  "content": [
+    {
+      "type": "text",
+      "text": "No configured backend tool could satisfy the request."
+    }
+  ]
 }
 ```
 
-**Returns (`Promise<any>`):**
+## Backend discovery
 
-The method returns a promise that resolves with the direct result from the chosen backend MCP server's method. The structure of this result is specific to the backend and the MCP method called on it.
+At startup the gateway:
 
-**Errors:**
-Can throw `ResponseError` with codes like:
-- `ErrorCodes.InvalidParams` (-32602): If `requestParams` are invalid.
-- `-32000`: AI orchestrator could not determine an action.
-- `-32001`: Gateway not fully initialized.
-- `-32002`: Gateway critical initialization error (options missing).
-- `-32003`: Error during AI orchestration step.
-- `-32004`: Error executing plan on backend.
+1. Starts every configured stdio backend.
+2. Completes standard MCP initialization.
+3. Calls `tools/list` on each backend.
+4. Converts every discovered tool schema into an OpenAI function definition.
+5. Refuses startup if any configured backend fails.
 
-## Notifications
+The gateway chooses one backend tool per `orchestrate_task` call. It does not execute autonomous multi-step loops.
 
-### `shutdown`
+## Configuration
 
-Sent by the client to request a graceful shutdown of the `mcp-agentify` server and its managed backend processes. The server will attempt to shut down backends and then prepare to exit. The client should wait for the `shutdown` request to complete (if it were a request) or simply follow up with an `exit` notification.
+```ts
+interface GatewayConfig {
+  backends: Array<{
+    id: string;
+    displayName?: string;
+    type: 'stdio';
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+    inheritEnv?: string[];
+    startupTimeoutMs?: number;
+  }>;
+  logLevel?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent';
+  frontendPort?: number | null;
+  openaiModel?: string;
+  agents?: Array<`openai/${string}`>;
+}
+```
 
-**Parameters:** None.
+Backend IDs must be unique and contain only letters, numbers, `_`, or `-`.
 
-### `exit`
+`env` values may reference gateway variables with `${VARIABLE_NAME}`. Missing referenced or inherited variables fail startup rather than silently passing an empty credential.
 
-Sent by the client to notify the server that it should exit immediately. The server will attempt a final cleanup of backends and then terminate the process.
+## Dashboard API
 
-**Parameters:** None. 
+When the local dashboard is enabled:
+
+- `GET /api/status`
+- `GET /api/config`
+- `GET /api/logs`
+- `GET /api/traces`
+- `GET /api/agents`
+- `POST /api/chat-with-agent`
+- `WS /ws`
+
+The dashboard binds only to `127.0.0.1`. It rejects non-local `Host` headers, cross-origin browser requests and WebSockets, and non-JSON API posts. Responses are redacted before transmission.

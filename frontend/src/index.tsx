@@ -8,4 +8,4 @@ if (appRoot) {
     render(<App />, appRoot);
 } else {
     console.error("Application root element '#app' not found.");
-} 
+}

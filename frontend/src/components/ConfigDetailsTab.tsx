@@ -1,32 +1,9 @@
-import { h, ComponentChild, Fragment } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
-
-// Import actual types for better type safety if they are simple enough
-// For this component, it receives GatewayOptions and GatewayClientInitOptions directly from the API
-// so we might not need to import the full Zod schemas here, just the TS types if available
-import type { GatewayOptions } from '../../../src/interfaces'; // Adjusted path
-import type { GatewayClientInitOptions } from '../../../src/schemas'; // Adjusted path
+import { useEffect, useState } from 'preact/hooks';
 
 interface ConfigDetailsData {
-    initialEnvConfig?: Partial<GatewayOptions>;
-    clientSentInitOptions?: GatewayClientInitOptions;
-    finalEffectiveConfig?: GatewayOptions;
+    loadedConfig?: unknown;
+    finalEffectiveConfig?: unknown;
 }
-
-// Define a more specific type for the data that can be rendered
-type RenderableConfig = Partial<GatewayOptions> | GatewayClientInitOptions | GatewayOptions | { note: string } | null | undefined;
-
-// Helper to render a config object or a placeholder message
-const renderConfigBlock = (title: string, data: RenderableConfig) => (
-    <div>
-        <h3>{title}</h3>
-        {data ? (
-            <pre>{JSON.stringify(data, null, 2)}</pre>
-        ) : (
-            <pre>{JSON.stringify({ note: 'Data not available or not yet set.' }, null, 2)}</pre>
-        )}
-    </div>
-);
 
 export function ConfigDetailsTab() {
     const [configDetails, setConfigDetails] = useState<ConfigDetailsData | null>(null);
@@ -34,30 +11,28 @@ export function ConfigDetailsTab() {
 
     useEffect(() => {
         fetch('/api/config-details')
-            .then(res => res.ok ? res.json() : Promise.reject(new Error(`Failed to fetch config details: ${res.status} ${res.statusText}`)))
-            .then((data: ConfigDetailsData) => setConfigDetails(data))
-            .catch(err => {
-                console.error('Error fetching config details:', err);
-                setError(`Error fetching config details: ${err.message}`);
-            });
+            .then((response) => {
+                if (!response.ok) throw new Error(`Failed to fetch config details: ${response.status}`);
+                return response.json();
+            })
+            .then(setConfigDetails)
+            .catch((caughtError) => setError(String(caughtError)));
     }, []);
 
-    if (error) {
-        return <pre>Error: {error}</pre>;
-    }
-
-    if (!configDetails) {
-        return <p>Loading configuration details...</p>;
-    }
+    if (error) return <pre>Error: {error}</pre>;
+    if (!configDetails) return <p>Loading configuration details...</p>;
 
     return (
         <div class="tab-content-item">
+            <h2>Configuration</h2>
             <section>
-                <h2>Configuration States</h2>
-                {renderConfigBlock("Initial Environment/Default Config (Pre-MCP Handshake):", configDetails.initialEnvConfig)}
-                {renderConfigBlock("Client-Sent `initializationOptions` (Raw from client):", configDetails.clientSentInitOptions)}
-                {renderConfigBlock("Final Effective Config (Post-MCP Handshake):", configDetails.finalEffectiveConfig)}
+                <h3>Loaded Config</h3>
+                <pre>{JSON.stringify(configDetails.loadedConfig, null, 2)}</pre>
+            </section>
+            <section>
+                <h3>Final Effective Config</h3>
+                <pre>{JSON.stringify(configDetails.finalEffectiveConfig, null, 2)}</pre>
             </section>
         </div>
     );
-} 
+}

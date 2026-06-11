@@ -1,39 +1,50 @@
-// tests/integration/mock-backends/filesystem-mock.js
-// A very simple mock MCP server for filesystem operations (CommonJS)
-const rpc = require('vscode-jsonrpc/node');
+const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
+const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { z } = require('zod/v4');
 
-const connection = rpc.createMessageConnection(process.stdin, process.stdout);
+const server = new McpServer({ name: 'filesystem-mock', version: '1.0.0' });
 
-connection.onRequest('initialize', (params) => {
-  // console.error('[filesystem-mock] Received initialize');
-  return { capabilities: { textDocumentSync: 1 } }; // Example capabilities
+if (process.env.RUNTIME_VALUE) {
+  console.error(`backend received ${process.env.RUNTIME_VALUE}`);
+}
+
+server.registerTool(
+  'list_directory',
+  {
+    description: 'List files in a directory.',
+    inputSchema: { path: z.string() },
+  },
+  async ({ path }) => ({
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          files: path === '/testpath' ? ['file1.txt', 'file2.js'] : [],
+          path,
+        }),
+      },
+    ],
+  }),
+);
+
+server.registerTool(
+  'read_text_file',
+  {
+    description: 'Read a UTF-8 text file.',
+    inputSchema: { path: z.string() },
+  },
+  async ({ path }) => ({
+    content: [
+      {
+        type: 'text',
+        text: path === '/testpath/file1.txt' ? 'Hello from mock filesystem!' : 'File not found',
+      },
+    ],
+    isError: path !== '/testpath/file1.txt',
+  }),
+);
+
+server.connect(new StdioServerTransport()).catch((error) => {
+  console.error(error);
+  process.exit(1);
 });
-
-connection.onRequest('fs/list', (params) => {
-  // console.error(`[filesystem-mock] Received fs/list with params: ${JSON.stringify(params)}`);
-  if (params && params.path === '/testpath') {
-    return { files: ['file1.txt', 'file2.js'], path: params.path };
-  }
-  return { files: [], path: params ? params.path : 'unknown' };
-});
-
-connection.onRequest('fs/readFile', (params) => {
-  // console.error(`[filesystem-mock] Received fs/readFile with params: ${JSON.stringify(params)}`);
-  if (params && params.path === '/testpath/file1.txt') {
-    return { content: 'Hello from mock filesystem!' };
-  }
-  return rpc.ResponseError(rpc.ErrorCodes.InvalidParams, 'File not found by mock');
-});
-
-connection.onNotification('shutdown', () => {
-  // console.error('[filesystem-mock] Received shutdown');
-  connection.dispose();
-});
-
-connection.onNotification('exit', () => {
-  // console.error('[filesystem-mock] Received exit');
-  process.exit(0);
-});
-
-// console.error('[filesystem-mock] Listening...');
-connection.listen(); 

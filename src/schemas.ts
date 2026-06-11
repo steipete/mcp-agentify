@@ -1,17 +1,22 @@
 import { z } from 'zod';
-import type { PinoLogLevel } from './logger';
+
+const EnvironmentVariableNameSchema = z
+    .string()
+    .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'Expected an environment variable name.');
 
 export const BackendStdioConfigSchema = z.object({
-    id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/, 'Backend ID must be OpenAI Tool Name compliant.'),
-    displayName: z.string().optional(),
+    id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/, 'Backend ID must contain only letters, numbers, _ or -.'),
+    displayName: z.string().min(1).optional(),
     type: z.literal('stdio'),
     command: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    env: z.record(z.string()).optional(),
+    args: z.array(z.string()).optional().default([]),
+    env: z.record(z.string()).optional().default({}),
+    inheritEnv: z.array(EnvironmentVariableNameSchema).optional().default([]),
+    startupTimeoutMs: z.number().int().min(1_000).max(120_000).optional().default(30_000),
 });
 export type BackendStdioConfig = z.infer<typeof BackendStdioConfigSchema>;
 
-export const BackendConfigSchema = BackendStdioConfigSchema; // PoC only supports stdio as per spec.md
+export const BackendConfigSchema = BackendStdioConfigSchema;
 export type BackendConfig = z.infer<typeof BackendConfigSchema>;
 
 export const OrchestrationContextSchema = z
@@ -24,58 +29,49 @@ export const OrchestrationContextSchema = z
     .nullable();
 export type OrchestrationContext = z.infer<typeof OrchestrationContextSchema>;
 
-// This schema now primarily validates the structure of `backends` when parsing client-provided initializationOptions.
-// Core gateway settings (logLevel, OPENAI_API_KEY, FRONTEND_PORT) are now strictly environment-driven and set pre-MCP handshake.
-export const GatewayClientInitOptionsSchema = z.object({
-    // Backends are now optional; if omitted, the gateway will run with zero backends and expose only dynamic agents
-    backends: z.array(BackendConfigSchema).optional().default([]),
-    // The following are optional if a client *really* wants to send them, but mcp-agentify will ignore them
-    // in favor of environment variables for its own configuration.
-    logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional(),
-    OPENAI_API_KEY: z.string().min(1).optional(),
-    ANTHROPIC_API_KEY: z.string().optional(),
-    COHERE_API_KEY: z.string().optional(),
-    FRONTEND_PORT: z.number().int().positive().optional().nullable(),
-});
-export type GatewayClientInitOptions = z.infer<typeof GatewayClientInitOptionsSchema>;
-
-// GatewayOptions now represents the final, merged, and internally used configuration.
-// It will be populated from environment variables first, then potentially from client for `backends`.
-export const GatewayOptionsSchema = z.object({
-    logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional().default('info'),
-    OPENAI_API_KEY: z.string().min(1).optional(), // Can be from env or client, env takes precedence.
-    ANTHROPIC_API_KEY: z.string().optional(),
-    COHERE_API_KEY: z.string().optional(),
-    // Add other API keys as needed following the same pattern
-
-    // FRONTEND_PORT is now FRONTEND_PORT. It determines if and on what port the debug web server runs.
-    // This is primarily controlled by the mcp-agentify server's own environment.
-    // If not in env, client can suggest it, but env is king.
-    // If neither, it might not start, or start on a default if the server logic implies one (e.g., 3030).
-    FRONTEND_PORT: z.number().int().positive().optional().nullable(),
-
-    // `backends` configuration is primarily client-driven via initializationOptions.
-    backends: z.array(BackendConfigSchema).min(1, 'At least one backend configuration is required.'),
-    gptAgents: z.array(z.string()).optional(), // For dynamically exposed agent methods
-    projectRoot: z.string().optional(), // NEW: For explicit project root path
-});
-export type GatewayOptions = z.infer<typeof GatewayOptionsSchema>;
-
 export const AgentifyOrchestrateTaskParamsSchema = z.object({
     query: z.string().min(1),
-    context: OrchestrationContextSchema, // Uses the schema defined above
+    context: OrchestrationContextSchema,
 });
 export type AgentifyOrchestrateTaskParams = z.infer<typeof AgentifyOrchestrateTaskParamsSchema>;
 
-export const LLMGeneratedArgumentsSchema = z.object({
-    mcp_method: z.string().min(1),
-    mcp_params: z.record(z.unknown()), // Generic object, as params vary widely
+const GatewayConfigShape = {
+    backends: z.array(BackendConfigSchema).min(1, 'At least one backend configuration is required.'),
+    logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).optional().default('info'),
+    frontendPort: z.number().int().min(1).max(65_535).optional().nullable().default(null),
+    openaiModel: z.string().min(1).optional().default('gpt-4.1-mini'),
+    agents: z
+        .array(z.string().regex(/^openai\/.+$/i, 'Only OpenAI agents are supported.'))
+        .optional()
+        .default([]),
+};
+
+export const GatewayFileConfigSchema = z.object(GatewayConfigShape).superRefine((value, context) => {
+    const ids = new Set<string>();
+    for (const backend of value.backends) {
+        if (ids.has(backend.id)) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['backends'],
+                message: `Duplicate backend id: ${backend.id}`,
+            });
+        }
+        ids.add(backend.id);
+    }
 });
-export type LLMGeneratedArguments = z.infer<typeof LLMGeneratedArgumentsSchema>;
+export type GatewayFileConfig = z.infer<typeof GatewayFileConfigSchema>;
+
+export const GatewayOptionsSchema = z.object({
+    ...GatewayConfigShape,
+    openaiApiKey: z.string().min(1, 'OPENAI_API_KEY is required.'),
+    openaiBaseUrl: z.string().url().optional(),
+    configPath: z.string().optional(),
+});
+export type GatewayOptions = z.infer<typeof GatewayOptionsSchema>;
 
 export const LLMPlanSchema = z.object({
-    backendId: z.string(), // Corresponds to BackendConfig.id
-    mcpMethod: z.string(),
-    mcpParams: z.record(z.unknown()),
+    backendId: z.string().min(1),
+    toolName: z.string().min(1),
+    arguments: z.record(z.unknown()),
 });
-export type Plan = z.infer<typeof LLMPlanSchema>; // spec.md refers to this as Plan
+export type Plan = z.infer<typeof LLMPlanSchema>;

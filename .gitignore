@@ -26,8 +26,8 @@ node_modules/
 
 # Build output & Caches
 .parcel-cache/
-dist/
+frontend/public/
 
 # Task files
 tasks.json
-tasks/ 
+tasks/
