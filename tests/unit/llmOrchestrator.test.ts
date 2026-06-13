@@ -6,9 +6,11 @@ import { initializeLogger } from '../../src/logger';
 
 const createCompletion = vi.fn();
 vi.mock('openai', () => ({
-    default: vi.fn().mockImplementation(() => ({
-        chat: { completions: { create: createCompletion } },
-    })),
+    default: vi.fn().mockImplementation(function MockOpenAI() {
+        return {
+            chat: { completions: { create: createCompletion } },
+        };
+    }),
     APIError: class APIError extends Error {},
 }));
 
