@@ -51,7 +51,7 @@ class LLMOrchestratorService {
         this.toolTargets = new Map();
         this.logger = logger.child({ component: 'LLMOrchestratorService' });
         this.model = model;
-        this.openai = new openai_1.default({ apiKey, baseURL });
+        this.openai = new openai_1.default({ apiKey, baseURL, fetch: globalThis.fetch });
         const functionNames = new Set();
         this.tools = backendTools.map((tool) => {
             const functionName = createFunctionName(tool, functionNames);

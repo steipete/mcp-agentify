@@ -6,3 +6,4 @@
 - Replace legacy JSON-RPC framing with the official MCP SDK and discover backend tools dynamically.
 - Package the local dashboard, bind it to localhost, and redact credentials from configuration, logs, traces, errors, and backend arguments.
 - Add clean builds, package validation, current backend examples, integration tests, and Node.js CI.
+- Use Node.js native `fetch` for OpenAI requests to avoid incomplete chunked responses on current Node.js 22 releases.
