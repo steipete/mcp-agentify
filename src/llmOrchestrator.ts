@@ -42,7 +42,7 @@ export class LLMOrchestratorService {
     ) {
         this.logger = logger.child({ component: 'LLMOrchestratorService' });
         this.model = model;
-        this.openai = new OpenAI({ apiKey, baseURL });
+        this.openai = new OpenAI({ apiKey, baseURL, fetch: globalThis.fetch });
 
         const functionNames = new Set<string>();
         this.tools = backendTools.map((tool) => {

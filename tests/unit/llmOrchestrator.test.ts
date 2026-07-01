@@ -38,7 +38,7 @@ describe('LLMOrchestratorService', () => {
             tools,
             initializeLogger({ logLevel: 'silent' }),
         );
-        expect(OpenAI).toHaveBeenCalledWith({ apiKey: 'test-key', baseURL: undefined });
+        expect(OpenAI).toHaveBeenCalledWith({ apiKey: 'test-key', baseURL: undefined, fetch: globalThis.fetch });
         expect(service.getAvailableToolCount()).toBe(1);
     });
 
