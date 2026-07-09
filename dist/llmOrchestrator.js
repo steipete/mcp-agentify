@@ -159,7 +159,7 @@ class LLMOrchestratorService {
                 this.logger.error({
                     status: error.status,
                     code: error.code,
-                    requestId: error.request_id,
+                    requestId: error.requestID,
                     message: (0, redaction_1.redactText)(error.message),
                 }, 'OpenAI request failed.');
             }

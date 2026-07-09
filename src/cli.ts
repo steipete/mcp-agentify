@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
-import 'dotenv/config';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { config as loadEnvironment } from 'dotenv';
 import { startAgentifyServer } from './server';
 import { GatewayFileConfigSchema, GatewayOptionsSchema } from './schemas';
 import { getPackageVersion } from './utils';
+
+loadEnvironment({ quiet: true });
 
 interface CliArguments {
     configPath?: string;

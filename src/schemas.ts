@@ -10,7 +10,7 @@ export const BackendStdioConfigSchema = z.object({
     type: z.literal('stdio'),
     command: z.string().min(1),
     args: z.array(z.string()).optional().default([]),
-    env: z.record(z.string()).optional().default({}),
+    env: z.record(z.string(), z.string()).optional().default({}),
     inheritEnv: z.array(EnvironmentVariableNameSchema).optional().default([]),
     startupTimeoutMs: z.number().int().min(1_000).max(120_000).optional().default(30_000),
 });
@@ -72,6 +72,6 @@ export type GatewayOptions = z.infer<typeof GatewayOptionsSchema>;
 export const LLMPlanSchema = z.object({
     backendId: z.string().min(1),
     toolName: z.string().min(1),
-    arguments: z.record(z.unknown()),
+    arguments: z.record(z.string(), z.unknown()),
 });
 export type Plan = z.infer<typeof LLMPlanSchema>;

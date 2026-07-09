@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer, request as httpRequest, type Server } from 'node:http';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -206,6 +206,23 @@ describe('packaged gateway', { timeout: TEST_TIMEOUT }, () => {
         ]);
     });
 
+    it('keeps CLI stdout protocol-safe when loading an environment file', () => {
+        const environmentDirectory = join(tempDirectory, 'dotenv');
+        mkdirSync(environmentDirectory);
+        writeFileSync(join(environmentDirectory, '.env'), 'MCP_AGENTIFY_TEST_VALUE=loaded\n');
+
+        const result = spawnSync(process.execPath, [resolve('dist/cli.js'), '--help'], {
+            cwd: environmentDirectory,
+            env: getDefaultEnvironment(),
+            encoding: 'utf8',
+        });
+
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe('');
+        expect(result.stdout).toMatch(/^mcp-agentify /);
+        expect(result.stdout).not.toContain('[dotenv@');
+    });
+
     it('routes a request through OpenAI to a discovered backend MCP tool', async () => {
         const result = await client.callTool({
             name: 'orchestrate_task',
@@ -290,10 +307,19 @@ describe('packaged gateway', { timeout: TEST_TIMEOUT }, () => {
             },
             body: '{}',
         });
+        const emptyBodyStatus = await requestDashboardStatus(frontendPort, {
+            method: 'POST',
+            path: '/api/chat-with-agent',
+            headers: {
+                Host: `127.0.0.1:${frontendPort}`,
+                'Content-Type': 'application/json',
+            },
+        });
 
         expect(reboundStatus).toBe(403);
         expect(originStatus).toBe(403);
         expect(contentTypeStatus).toBe(415);
+        expect(emptyBodyStatus).toBe(400);
     });
 
     it('accepts only same-origin dashboard WebSockets', async () => {

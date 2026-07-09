@@ -11,7 +11,7 @@ exports.BackendStdioConfigSchema = zod_1.z.object({
     type: zod_1.z.literal('stdio'),
     command: zod_1.z.string().min(1),
     args: zod_1.z.array(zod_1.z.string()).optional().default([]),
-    env: zod_1.z.record(zod_1.z.string()).optional().default({}),
+    env: zod_1.z.record(zod_1.z.string(), zod_1.z.string()).optional().default({}),
     inheritEnv: zod_1.z.array(EnvironmentVariableNameSchema).optional().default([]),
     startupTimeoutMs: zod_1.z.number().int().min(1000).max(120000).optional().default(30000),
 });
@@ -60,6 +60,6 @@ exports.GatewayOptionsSchema = zod_1.z.object({
 exports.LLMPlanSchema = zod_1.z.object({
     backendId: zod_1.z.string().min(1),
     toolName: zod_1.z.string().min(1),
-    arguments: zod_1.z.record(zod_1.z.unknown()),
+    arguments: zod_1.z.record(zod_1.z.string(), zod_1.z.unknown()),
 });
 //# sourceMappingURL=schemas.js.map

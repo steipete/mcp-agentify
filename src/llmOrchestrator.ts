@@ -30,7 +30,7 @@ export class LLMOrchestratorService {
     private readonly openai: OpenAI;
     private readonly logger: Logger<PinoLogLevel>;
     private readonly model: string;
-    private tools: OpenAI.Chat.Completions.ChatCompletionTool[];
+    private tools: OpenAI.Chat.Completions.ChatCompletionFunctionTool[];
     private readonly toolTargets = new Map<string, ToolTarget>();
 
     constructor(
@@ -165,7 +165,7 @@ export class LLMOrchestratorService {
                     {
                         status: error.status,
                         code: error.code,
-                        requestId: error.request_id,
+                        requestId: error.requestID,
                         message: redactText(error.message),
                     },
                     'OpenAI request failed.',

@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-require("dotenv/config");
 const node_fs_1 = require("node:fs");
 const node_path_1 = require("node:path");
+const dotenv_1 = require("dotenv");
 const server_1 = require("./server");
 const schemas_1 = require("./schemas");
 const utils_1 = require("./utils");
+(0, dotenv_1.config)({ quiet: true });
 function usage() {
     return `mcp-agentify ${(0, utils_1.getPackageVersion)()}
 

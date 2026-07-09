@@ -171,7 +171,7 @@ export class FrontendServer {
         this.app.get('/api/traces', this.paginatedHandler(this.mcpTraceBuffer, 'traces'));
 
         this.app.post('/api/chat-with-agent', async (request, response) => {
-            const body = request.body as {
+            const body = (request.body ?? {}) as {
                 agentModelString?: string;
                 params?: { query?: string };
             };
