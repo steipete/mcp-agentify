@@ -7,3 +7,4 @@
 - Package the local dashboard, bind it to localhost, and redact credentials from configuration, logs, traces, errors, and backend arguments.
 - Add clean builds, package validation, current backend examples, integration tests, and Node.js CI.
 - Use Node.js native `fetch` for OpenAI requests to avoid incomplete chunked responses on current Node.js 22 releases.
+- Refresh runtime and lint tooling, adopt the validated ESLint 10 line, and pin patched transitive HTTP, parser, and CSS dependencies.
